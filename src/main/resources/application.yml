@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: food-delivery
+
+  datasource:
+    # Values come from env vars; defaults match scripts/db-setup.sql for local dev.
+    url: ${DB_URL:jdbc:mysql://localhost:3306/food_delivery}
+    username: ${DB_USERNAME:food_app}
+    password: ${DB_PASSWORD:food_app_pwd}
+    hikari:
+      maximum-pool-size: 20
+
+  jpa:
+    # Schema is owned by Flyway; Hibernate only checks entities match the tables.
+    hibernate:
+      ddl-auto: validate
+    # No lazy loading outside transactions (e.g. during JSON rendering).
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+app:
+  jwt:
+    # HMAC-SHA256 key, must be >= 32 bytes. Override via env var outside local dev.
+    secret: ${JWT_SECRET:local-dev-secret-change-me-please-32bytes-min}
+    expiration-minutes: 60
+
+server:
+  error:
+    include-stacktrace: never
