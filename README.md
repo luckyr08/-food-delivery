@@ -29,8 +29,15 @@ Override connection settings with `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_S
 ## Design decisions
 See [`docs/decisions/`](docs/decisions).
 
+## Seeded data
+- Admin: `admin@fooddelivery.com` / `Admin@123` (created by migration `V2`; change outside local dev).
+
 ## Assumptions
-_TBD_
+- One order contains items from a single restaurant.
+- `menu_items.stock = NULL` means unlimited; a number means limited units that can't go below 0.
+- The delivery address is captured as text on each order (no saved address book).
+- Cities, restaurants and menu items are soft-deleted (`active = false`) because past orders reference them.
+- Money is stored with 2 decimal places in a single currency (INR).
 
 ## API overview
 _TBD_
