@@ -117,6 +117,21 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void accessDeniedInsideControllerIs403NotA500() throws Exception {
+        mvc.perform(get("/test/denied"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+    }
+
+    @Test
+    void badCredentialsAre401WithGenericMessage() throws Exception {
+        mvc.perform(get("/test/bad-credentials"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
+                .andExpect(jsonPath("$.detail").value("Invalid email or password"));
+    }
+
+    @Test
     void unknownUrlReturns404ProblemDetail() throws Exception {
         mvc.perform(get("/test/does-not-exist"))
                 .andExpect(status().isNotFound())
@@ -161,6 +176,16 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/optimistic")
         void optimistic() {
             throw new ObjectOptimisticLockingFailureException("Order", 1L);
+        }
+
+        @GetMapping("/test/denied")
+        void denied() {
+            throw new org.springframework.security.access.AccessDeniedException("nope");
+        }
+
+        @GetMapping("/test/bad-credentials")
+        void badCredentials() {
+            throw new org.springframework.security.authentication.BadCredentialsException("Bad credentials");
         }
 
         @GetMapping("/test/boom")

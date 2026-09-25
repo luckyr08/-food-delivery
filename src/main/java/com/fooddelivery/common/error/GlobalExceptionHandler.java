@@ -1,5 +1,6 @@
 package com.fooddelivery.common.error;
 
+import com.fooddelivery.security.JwtAuthenticationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
@@ -8,6 +9,10 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -40,6 +45,36 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleApiException(ApiException ex) {
         log.warn("{} {}: {}", ex.getStatus().value(), ex.getCode(), ex.getMessage());
         return problem(ex.getStatus(), ex.getCode(), ex.getMessage());
+    }
+
+    // ---- security ----
+
+    /**
+     * 401. Reached from controllers (login) and, via ProblemDetailsSecurityHandler, from the filter chain.
+     * Bad credentials get one generic message so callers can't tell unknown email from wrong password.
+     */
+    @ExceptionHandler(AuthenticationException.class)
+    public ProblemDetail handleAuthentication(AuthenticationException ex) {
+        ProblemDetail pd;
+        if (ex instanceof JwtAuthenticationException jwt) {
+            pd = problem(HttpStatus.UNAUTHORIZED, jwt.getCode(), jwt.getMessage());
+        } else if (ex instanceof BadCredentialsException) {
+            pd = problem(HttpStatus.UNAUTHORIZED, ErrorCode.INVALID_CREDENTIALS, "Invalid email or password");
+        } else if (ex instanceof DisabledException) {
+            pd = problem(HttpStatus.UNAUTHORIZED, ErrorCode.ACCOUNT_DISABLED, "Account is disabled");
+        } else {
+            pd = problem(HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED, "Authentication required");
+        }
+        log.warn("401 {}: {}", pd.getProperties().get(CODE), ex.getMessage());
+        return pd;
+    }
+
+    /** 403. Without this, @PreAuthorize denials would fall into the catch-all and become 500s. */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ProblemDetail handleAccessDenied(AccessDeniedException ex) {
+        log.warn("403 ACCESS_DENIED: {}", ex.getMessage());
+        return problem(HttpStatus.FORBIDDEN, ErrorCode.ACCESS_DENIED,
+                "You do not have permission to perform this action");
     }
 
     // ---- validation ----

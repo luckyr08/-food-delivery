@@ -85,15 +85,56 @@ All decisions with alternatives and trade-offs: [`docs/decisions/`](docs/decisio
 ## Seeded data
 - Admin: `admin@fooddelivery.com` / `Admin@123` (created by migration `V2`; change outside local dev).
 
+## Authentication & roles
+Stateless JWT (HS256, 60-minute expiry). Swagger UI: http://localhost:8080/swagger-ui.html
+(use **Authorize** and paste the `accessToken`).
+
+```bash
+# register (always creates a CUSTOMER)
+curl -X POST localhost:8080/api/auth/register -H 'Content-Type: application/json' \
+  -d '{"name":"Asha","email":"asha@example.com","password":"secret123"}'
+
+# login -> {"accessToken":"...","tokenType":"Bearer","expiresIn":3600,"userId":2,"role":"CUSTOMER"}
+curl -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"asha@example.com","password":"secret123"}'
+
+# call a protected endpoint
+curl localhost:8080/api/users/me -H "Authorization: Bearer <accessToken>"
+```
+
+| Role | How the account is created | Can |
+|---|---|---|
+| ADMIN | Seeded | Manage cities, restaurants, delivery partners (`/api/admin/**`) |
+| RESTAURANT_OWNER | By admin | Manage own restaurant's menu, accept/reject its orders |
+| CUSTOMER | Self-registration | Browse, order, track, rate |
+| DELIVERY_PARTNER | By admin | Accept assignments, update delivery status |
+
+Authorization has three layers: URL rules (e.g. `/api/admin/**` → ADMIN), `@PreAuthorize` role checks per
+endpoint, and **ownership checks in services** (an owner can only touch their own restaurant, a customer
+only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**`) is public.
+
 ## Assumptions
 - One order contains items from a single restaurant.
 - `menu_items.stock = NULL` means unlimited; a number means limited units that can't go below 0.
 - The delivery address is captured as text on each order (no saved address book).
 - Cities, restaurants and menu items are soft-deleted (`active = false`) because past orders reference them.
 - Money is stored with 2 decimal places in a single currency (INR).
+- Browsing cities, restaurants and menus doesn't require login; everything else does.
+- Registration returns the profile only; the client then calls login to get a token.
+- Tokens can't be revoked before expiry (60 min); a deactivated user's token keeps working until then.
 
 ## API overview
-_TBD_
+| Method | Path | Access | Description |
+|---|---|---|---|
+| POST | `/api/auth/register` | Public | Register a customer |
+| POST | `/api/auth/login` | Public | Get an access token |
+| GET | `/api/users/me` | Authenticated | Own profile |
+
+## Testing
+- **Unit tests** (JUnit 5, no Spring): e.g. `JwtServiceTest` — expiry, tampered payload, wrong key, weak secret.
+- **Web slice tests** (`@WebMvcTest`): error-contract mapping in `GlobalExceptionHandlerTest`.
+- **Integration tests** (`@SpringBootTest` + MockMvc + real MySQL): extend `IntegrationTestBase`, which
+  empties all tables before each test ([ADR 0005](docs/decisions/0005-integration-test-isolation.md)).
 
 ## AI workflow
 Developed with Claude Code. Working agreement: [`CLAUDE.md`](CLAUDE.md).
