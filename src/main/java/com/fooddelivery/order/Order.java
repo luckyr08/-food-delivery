@@ -62,6 +62,10 @@ public class Order extends AuditedEntity {
     @Column(name = "idempotency_key", length = 64)
     private String idempotencyKey;
 
+    /** SHA-256 of the placement request; detects the same key reused with a different body. */
+    @Column(name = "idempotency_request_hash", length = 64)
+    private String idempotencyRequestHash;
+
     /** Items are part of the order aggregate: saved and removed with it. */
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> items = new ArrayList<>();

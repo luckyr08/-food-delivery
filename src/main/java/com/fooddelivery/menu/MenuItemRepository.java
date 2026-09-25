@@ -1,6 +1,7 @@
 package com.fooddelivery.menu;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
@@ -25,4 +26,24 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, Long> {
             ORDER BY m.category ASC, m.name ASC
             """)
     List<MenuItem> findPublicMenu(Long restaurantId, String category, boolean vegOnly);
+
+    /**
+     * Atomic check-and-decrement: the oversell guard. InnoDB row-locks the item, re-reads the latest
+     * committed row (a locking read, even under REPEATABLE READ), evaluates the WHERE and updates.
+     * Returns 1 on success, 0 if the item is gone/unavailable or has too little stock.
+     * Unlimited items (stock NULL) are matched and locked too, so a concurrent owner change can't slip
+     * in between. version is bumped so an owner's concurrent entity update fails with 409.
+     */
+    @Modifying
+    @Query(nativeQuery = true, value = """
+            UPDATE menu_items
+            SET stock = CASE WHEN stock IS NULL THEN NULL ELSE stock - :quantity END,
+                version = version + 1,
+                updated_at = UTC_TIMESTAMP(6)
+            WHERE id = :id
+              AND active = TRUE
+              AND available = TRUE
+              AND (stock IS NULL OR stock >= :quantity)
+            """)
+    int deductStock(Long id, int quantity);
 }

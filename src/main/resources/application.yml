@@ -30,6 +30,10 @@ app:
     # HMAC-SHA256 key, must be >= 32 bytes. Override via env var outside local dev.
     secret: ${JWT_SECRET:local-dev-secret-change-me-please-32bytes-min}
     expiration-minutes: 60
+  order:
+    delivery-fee: 40.00
+    # Orders with a subtotal at or above this amount get free delivery.
+    free-delivery-from: 500.00
 
 server:
   error:

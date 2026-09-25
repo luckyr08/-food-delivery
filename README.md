@@ -79,6 +79,22 @@ Every error is an [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9
 
 Details: [ADR 0004](docs/decisions/0004-error-handling.md).
 
+## Concurrency & consistency
+- **No overselling:** stock is decremented with a single conditional `UPDATE ... WHERE stock >= :qty`
+  (row lock + check + write in one statement); 0 rows affected → `409 INSUFFICIENT_STOCK`.
+- **Atomic placement:** order, items, stock and payment are written in one transaction; any failure
+  (including a declined payment) rolls everything back.
+- **Deadlock-free:** items are locked in ascending id order, and stock rows are X-locked before
+  `order_items` (whose FK would otherwise take a shared lock first — a deadlock our concurrency test found).
+  Deadlocks/lock timeouts are still retried from outside the transaction as a safety net.
+- **Idempotent placement** with an optional `Idempotency-Key`, safe under concurrent duplicates.
+- **Payment** is charged last inside the transaction (mock gateway); an approved charge is refunded if
+  the transaction rolls back afterwards. A Saga with `PENDING_PAYMENT` is the production design
+  ([ADR 0008](docs/decisions/0008-order-placement.md)).
+- **Proven by `OrderConcurrencyTest`** (real server, real HTTP, real MySQL): 50 customers race for
+  10 units → exactly 10 orders, 40 × 409, final stock 0; opposite item order from 40 threads → no
+  deadlocks; 10 identical requests with one idempotency key → one order, stock deducted once.
+
 ## Design decisions
 All decisions with alternatives and trade-offs: [`docs/decisions/`](docs/decisions).
 
@@ -133,6 +149,9 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 - Owners set stock as an absolute number ("25 left"); customers never see stock numbers, only whether an
   item is available. Sold-out items remain listed as unavailable.
 - Accessing another owner's restaurant or menu item returns 404, never 403.
+- An order contains items from one restaurant; the same item can't appear on two lines.
+- Payment is simulated by an in-process mock gateway that approves every charge; cash on delivery
+  creates a `PENDING` payment settled on delivery.
 - Customers browse within one city (`cityId` is required).
 
 ## API overview
@@ -163,6 +182,20 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 | GET | `/api/restaurants?cityId=&q=&cuisine=&openOnly=&page=&size=` | Public | Browse a city's restaurants (open first) |
 | GET | `/api/restaurants/{id}` | Public | Restaurant details |
 | GET | `/api/restaurants/{id}/menu?category=&vegOnly=` | Public | Menu with `available` flag (no stock numbers) |
+| POST | `/api/orders` | Customer | Place an order (optional `Idempotency-Key` header) |
+| GET | `/api/orders?page=&size=` | Customer | My orders, newest first |
+| GET | `/api/orders/{id}` | Customer | My order with items and payment |
+
+### Placing an order
+```bash
+curl -X POST localhost:8080/api/orders -H "Authorization: Bearer $CUSTOMER_TOKEN" \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: 5f1c2a9e-order-1' \
+  -d '{"restaurantId":1,"items":[{"menuItemId":1,"quantity":2}],
+       "deliveryAddress":"Flat 4B, MG Road, Pune","paymentMethod":"UPI"}'
+```
+- `201` new order · `200` + `Idempotent-Replayed: true` for a repeated key · `409 INSUFFICIENT_STOCK` /
+  `RESTAURANT_CLOSED` / `ITEM_UNAVAILABLE` / `IDEMPOTENCY_KEY_REUSED` · `402 PAYMENT_DECLINED`
+- The request carries no prices; totals are computed server-side. Delivery fee 40.00, free from 500.00.
 
 Paginated responses have the shape `{content, page, size, totalElements, totalPages}`; `page` starts at 0,
 `size` is 1–100 (default 20). Sorting is fixed server-side.
@@ -188,6 +221,8 @@ curl -X POST localhost:8080/api/admin/delivery-partners -H "Authorization: Beare
 - **Web slice tests** (`@WebMvcTest`): error-contract mapping in `GlobalExceptionHandlerTest`.
 - **Integration tests** (`@SpringBootTest` + MockMvc + real MySQL): extend `IntegrationTestBase`, which
   empties all tables before each test ([ADR 0005](docs/decisions/0005-integration-test-isolation.md)).
+- **Concurrency tests** (`OrderConcurrencyTest`): real embedded server on a random port, many threads
+  released together by a `CountDownLatch`, asserting final DB state.
 
 ## AI workflow
 Developed with Claude Code. Working agreement: [`CLAUDE.md`](CLAUDE.md).

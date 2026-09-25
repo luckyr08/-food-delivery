@@ -7,14 +7,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-
-import java.sql.Statement;
-import java.util.List;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -31,7 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 public abstract class IntegrationTestBase {
 
-    protected static final String ADMIN_EMAIL = "admin@fooddelivery.com";
+    protected static final String ADMIN_EMAIL = DatabaseCleaner.ADMIN_EMAIL;
     protected static final String ADMIN_PASSWORD = "Admin@123";
 
     @Autowired
@@ -42,24 +38,7 @@ public abstract class IntegrationTestBase {
 
     @BeforeEach
     void cleanDatabase() {
-        List<String> tables = jdbc.queryForList(
-                "SELECT table_name FROM information_schema.tables "
-                        + "WHERE table_schema = DATABASE() AND table_name <> 'flyway_schema_history'",
-                String.class);
-        // FOREIGN_KEY_CHECKS is per connection, so everything must run on ONE connection
-        // (separate jdbc.update calls could each get a different pooled connection).
-        jdbc.execute((ConnectionCallback<Void>) connection -> {
-            try (Statement st = connection.createStatement()) {
-                st.execute("SET FOREIGN_KEY_CHECKS = 0");
-                for (String table : tables) {
-                    st.execute(table.equals("users")
-                            ? "DELETE FROM users WHERE email <> '" + ADMIN_EMAIL + "'"
-                            : "DELETE FROM " + table);
-                }
-                st.execute("SET FOREIGN_KEY_CHECKS = 1");
-            }
-            return null;
-        });
+        DatabaseCleaner.clean(jdbc);
     }
 
     // ---- auth helpers ----
@@ -131,6 +110,12 @@ public abstract class IntegrationTestBase {
         return idFrom(postAs(adminToken, "/api/admin/restaurants", """
                 {"ownerId":%d,"cityId":%d,"name":"%s","address":"1 Test Road","cuisine":"Indian"}
                 """.formatted(ownerId, cityId, name)).andExpect(status().isCreated()), "$.id");
+    }
+
+    protected void openRestaurant(String ownerToken, Long restaurantId) throws Exception {
+        patchAs(ownerToken, "/api/owner/restaurants/" + restaurantId + "/status", """
+                {"open":true}
+                """).andExpect(status().isOk());
     }
 
     /** stock null = unlimited. */

@@ -30,6 +30,10 @@ explain every line in an interview, so the workflow is deliberately slow.
 - Contended counters (stock, ratings aggregates) are changed with a single conditional
   `UPDATE ... WHERE <guard>` and the affected-row count is checked. No read-modify-save.
 - Multi-row locking happens in ascending id order to avoid deadlocks.
+- Take the exclusive lock on a parent row (e.g. the stock UPDATE on menu_items) BEFORE inserting child rows
+  that reference it: the child's FK check takes a shared lock, and S→X upgrades deadlock (see ADR 0008).
+- Retry (`@Retryable` on PessimisticLockingFailureException) wraps the transaction from outside and is only
+  a safety net, never the fix for a systematic deadlock.
 - "First writer wins" claims (partner assignment) use conditional UPDATE; losers get 409.
 - Side effects (notifications) run after commit: `@TransactionalEventListener(AFTER_COMMIT)` + `@Async`.
 
