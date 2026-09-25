@@ -20,6 +20,12 @@ public enum ErrorCode {
     CONCURRENT_MODIFICATION,
     INTERNAL_ERROR,
 
-    // auth
-    EMAIL_ALREADY_REGISTERED
+    // auth / users
+    EMAIL_ALREADY_REGISTERED,
+    CANNOT_DEACTIVATE_SELF,
+
+    // cities / restaurants
+    CITY_ALREADY_EXISTS,
+    CITY_INACTIVE,
+    INVALID_OWNER
 }

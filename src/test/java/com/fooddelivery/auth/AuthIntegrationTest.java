@@ -166,8 +166,7 @@ class AuthIntegrationTest extends IntegrationTestBase {
 
     @Test
     void publicBrowsingNeedsNoToken() throws Exception {
-        // No controller yet, so 404 — the point is it's NOT 401.
-        mvc.perform(get("/api/restaurants"))
-                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/cities"))
+                .andExpect(status().isOk());
     }
 }

@@ -122,6 +122,13 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 - Browsing cities, restaurants and menus doesn't require login; everything else does.
 - Registration returns the profile only; the client then calls login to get a token.
 - Tokens can't be revoked before expiry (60 min); a deactivated user's token keeps working until then.
+- Restaurant owners and delivery partners are onboarded by an admin, who sets their initial password
+  (production would use an invite / password-reset email).
+- One owner can own several restaurants; a restaurant can't move to another city.
+- New restaurants start closed (the owner opens them); new delivery partners start OFFLINE.
+- Deactivating a city hides it and its restaurants from browsing but doesn't modify them; deactivating a
+  restaurant also closes it. Orders already in progress are unaffected.
+- A delivery partner's availability status is controlled by the partner, not the admin.
 
 ## API overview
 | Method | Path | Access | Description |
@@ -129,6 +136,37 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 | POST | `/api/auth/register` | Public | Register a customer |
 | POST | `/api/auth/login` | Public | Get an access token |
 | GET | `/api/users/me` | Authenticated | Own profile |
+| GET | `/api/cities` | Public | Active cities |
+| POST | `/api/admin/cities` | Admin | Create city (`name` unique, case-insensitive) |
+| PATCH | `/api/admin/cities/{id}` | Admin | Rename / change state / activate-deactivate |
+| GET | `/api/admin/cities` | Admin | All cities incl. inactive |
+| POST | `/api/admin/restaurant-owners` | Admin | Create a restaurant-owner account |
+| POST | `/api/admin/restaurants` | Admin | Create a restaurant for an owner in a city (starts closed) |
+| PATCH | `/api/admin/restaurants/{id}` | Admin | Update details / activate-deactivate |
+| GET | `/api/admin/restaurants?cityId=&active=&page=&size=` | Admin | Paginated search |
+| POST | `/api/admin/delivery-partners` | Admin | Create partner account + profile (starts OFFLINE) |
+| PATCH | `/api/admin/delivery-partners/{id}` | Admin | Change city / vehicle |
+| GET | `/api/admin/delivery-partners?cityId=&status=&page=&size=` | Admin | Paginated search |
+| PATCH | `/api/admin/users/{id}/status` | Admin | Block / unblock any account |
+
+Paginated responses have the shape `{content, page, size, totalElements, totalPages}`; `page` starts at 0,
+`size` is 1–100 (default 20). Sorting is fixed server-side.
+
+### Admin onboarding flow
+```bash
+TOKEN=<admin accessToken>
+# 1. city
+curl -X POST localhost:8080/api/admin/cities -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Pune","state":"Maharashtra"}'
+# 2. owner account, then the restaurant (ownerId/cityId from the previous responses)
+curl -X POST localhost:8080/api/admin/restaurant-owners -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Ravi","email":"ravi@example.com","password":"secret123"}'
+curl -X POST localhost:8080/api/admin/restaurants -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"ownerId":2,"cityId":1,"name":"Spice Hub","address":"MG Road","cuisine":"North Indian"}'
+# 3. delivery partner (account + profile in one call)
+curl -X POST localhost:8080/api/admin/delivery-partners -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"Kiran","email":"kiran@example.com","password":"secret123","cityId":1,"vehicleType":"SCOOTER"}'
+```
 
 ## Testing
 - **Unit tests** (JUnit 5, no Spring): e.g. `JwtServiceTest` — expiry, tampered payload, wrong key, weak secret.

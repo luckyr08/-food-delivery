@@ -5,15 +5,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 
 import java.sql.Statement;
 import java.util.List;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -58,7 +62,7 @@ public abstract class IntegrationTestBase {
         });
     }
 
-    // ---- helpers shared by integration tests ----
+    // ---- auth helpers ----
 
     protected void registerCustomer(String email, String password) throws Exception {
         mvc.perform(post("/api/auth/register")
@@ -80,7 +84,52 @@ public abstract class IntegrationTestBase {
         return JsonPath.read(body, "$.accessToken");
     }
 
+    protected String adminToken() throws Exception {
+        return login(ADMIN_EMAIL, ADMIN_PASSWORD);
+    }
+
     protected static String bearer(String token) {
         return "Bearer " + token;
+    }
+
+    // ---- request helpers ----
+
+    protected ResultActions getAs(String token, String url) throws Exception {
+        return mvc.perform(get(url).header(HttpHeaders.AUTHORIZATION, bearer(token)));
+    }
+
+    protected ResultActions postAs(String token, String url, String json) throws Exception {
+        return mvc.perform(post(url).header(HttpHeaders.AUTHORIZATION, bearer(token))
+                .contentType(MediaType.APPLICATION_JSON).content(json));
+    }
+
+    protected ResultActions patchAs(String token, String url, String json) throws Exception {
+        return mvc.perform(patch(url).header(HttpHeaders.AUTHORIZATION, bearer(token))
+                .contentType(MediaType.APPLICATION_JSON).content(json));
+    }
+
+    /** Reads a numeric id from a response (JsonPath returns Integer for small numbers). */
+    protected static Long idFrom(ResultActions result, String path) throws Exception {
+        return ((Number) JsonPath.read(result.andReturn().getResponse().getContentAsString(), path)).longValue();
+    }
+
+    // ---- fixtures, created through the real admin API ----
+
+    protected Long createCity(String adminToken, String name) throws Exception {
+        return idFrom(postAs(adminToken, "/api/admin/cities", """
+                {"name":"%s","state":"Test State"}
+                """.formatted(name)).andExpect(status().isCreated()), "$.id");
+    }
+
+    protected Long createOwner(String adminToken, String email) throws Exception {
+        return idFrom(postAs(adminToken, "/api/admin/restaurant-owners", """
+                {"name":"Owner","email":"%s","password":"secret123"}
+                """.formatted(email)).andExpect(status().isCreated()), "$.id");
+    }
+
+    protected Long createRestaurant(String adminToken, Long ownerId, Long cityId, String name) throws Exception {
+        return idFrom(postAs(adminToken, "/api/admin/restaurants", """
+                {"ownerId":%d,"cityId":%d,"name":"%s","address":"1 Test Road","cuisine":"Indian"}
+                """.formatted(ownerId, cityId, name)).andExpect(status().isCreated()), "$.id");
     }
 }

@@ -1,11 +1,12 @@
-package com.fooddelivery.auth;
+package com.fooddelivery.user;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-public record RegisterRequest(
+/** Account details for any new user: self-registered customers and admin-created owners. */
+public record NewUserRequest(
         @NotBlank @Size(max = 100) String name,
         @NotBlank @Email @Size(max = 150) String email,
         // BCrypt only uses the first 72 bytes of a password.
@@ -14,7 +15,7 @@ public record RegisterRequest(
         String phone) {
 
     /** Runs during JSON deserialization, i.e. before Bean Validation sees the values. */
-    public RegisterRequest {
+    public NewUserRequest {
         name = name == null ? null : name.trim();
         email = email == null ? null : email.trim();
         phone = phone == null || phone.isBlank() ? null : phone.trim();

@@ -1,5 +1,6 @@
 package com.fooddelivery.auth;
 
+import com.fooddelivery.user.NewUserRequest;
 import com.fooddelivery.user.UserResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -21,7 +22,7 @@ public class AuthController {
 
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
-    public UserResponse register(@Valid @RequestBody RegisterRequest request) {
+    public UserResponse register(@Valid @RequestBody NewUserRequest request) {
         return authService.register(request);
     }
 
