@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/orders")
 @PreAuthorize("hasRole('CUSTOMER')")
@@ -28,9 +30,11 @@ public class OrderController {
     static final String REPLAYED = "Idempotent-Replayed";
 
     private final OrderService orderService;
+    private final OrderLifecycleService lifecycleService;
 
-    public OrderController(OrderService orderService) {
+    public OrderController(OrderService orderService, OrderLifecycleService lifecycleService) {
         this.orderService = orderService;
+        this.lifecycleService = lifecycleService;
     }
 
     /** 201 for a new order; 200 + Idempotent-Replayed: true when the key matched an earlier one. */
@@ -56,5 +60,17 @@ public class OrderController {
     @GetMapping("/{id}")
     public OrderResponse get(@AuthenticationPrincipal AuthUser me, @PathVariable Long id) {
         return orderService.getForCustomer(id, me.id());
+    }
+
+    /** Allowed while PLACED or ACCEPTED; refunds and restocks. */
+    @PostMapping("/{id}/cancel")
+    public OrderResponse cancel(@AuthenticationPrincipal AuthUser me, @PathVariable Long id,
+                                @Valid @RequestBody(required = false) CancelOrderRequest request) {
+        return lifecycleService.customerCancel(id, me.id(), request == null ? null : request.reason());
+    }
+
+    @GetMapping("/{id}/timeline")
+    public List<TimelineEntry> timeline(@AuthenticationPrincipal AuthUser me, @PathVariable Long id) {
+        return orderService.timelineForCustomer(id, me.id());
     }
 }

@@ -46,4 +46,16 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, Long> {
               AND (stock IS NULL OR stock >= :quantity)
             """)
     int deductStock(Long id, int quantity);
+
+    /** Returns stock of a cancelled/rejected order. Unlimited items (NULL) are left alone. */
+    @Modifying
+    @Query(nativeQuery = true, value = """
+            UPDATE menu_items
+            SET stock = stock + :quantity,
+                version = version + 1,
+                updated_at = UTC_TIMESTAMP(6)
+            WHERE id = :id
+              AND stock IS NOT NULL
+            """)
+    int restock(Long id, int quantity);
 }

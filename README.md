@@ -79,6 +79,21 @@ Every error is an [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9
 
 Details: [ADR 0004](docs/decisions/0004-error-handling.md).
 
+## Order lifecycle
+```
+PLACED ──► ACCEPTED ──► PREPARING ──► READY_FOR_PICKUP ──► OUT_FOR_DELIVERY ──► DELIVERED
+  │  │         │             (owner)          (owner)            (partner)          (partner)
+  │  └─────────┴──► CANCELLED  (customer before PREPARING; admin any time before DELIVERED)
+  └──► REJECTED (owner, with reason)
+```
+- Rules live in one transition table (`OrderStateMachine`): invalid move → `409 INVALID_STATUS_TRANSITION`,
+  wrong role → `403 TRANSITION_NOT_ALLOWED_FOR_ROLE`.
+- Reject/cancel refunds the payment (`REFUNDED`, or `VOIDED` for cash on delivery). Stock is returned
+  only if the food wasn't cooked yet (cancelled from PLACED/ACCEPTED).
+- Every change is recorded in `order_status_history`, which powers the customer's timeline.
+- Simultaneous changes to one order (e.g. customer cancels while the restaurant rejects) are resolved by
+  optimistic locking: one wins, the other gets `409` and none of its side effects apply.
+
 ## Concurrency & consistency
 - **No overselling:** stock is decremented with a single conditional `UPDATE ... WHERE stock >= :qty`
   (row lock + check + write in one statement); 0 rows affected → `409 INSUFFICIENT_STOCK`.
@@ -93,7 +108,8 @@ Details: [ADR 0004](docs/decisions/0004-error-handling.md).
   ([ADR 0008](docs/decisions/0008-order-placement.md)).
 - **Proven by `OrderConcurrencyTest`** (real server, real HTTP, real MySQL): 50 customers race for
   10 units → exactly 10 orders, 40 × 409, final stock 0; opposite item order from 40 threads → no
-  deadlocks; 10 identical requests with one idempotency key → one order, stock deducted once.
+  deadlocks; 10 identical requests with one idempotency key → one order, stock deducted once;
+  customer cancel vs restaurant reject on the same order (10 rounds) → one winner each, stock restored once.
 
 ## Design decisions
 All decisions with alternatives and trade-offs: [`docs/decisions/`](docs/decisions).
@@ -152,6 +168,9 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 - An order contains items from one restaurant; the same item can't appear on two lines.
 - Payment is simulated by an in-process mock gateway that approves every charge; cash on delivery
   creates a `PENDING` payment settled on delivery.
+- Customers can cancel only before the restaurant starts preparing; admins can cancel later (refund, no restock).
+- A restaurant must give a reason to reject an order. Orders not handled by the restaurant stay PLACED
+  (an auto-reject timeout job is a possible extension).
 - Customers browse within one city (`cityId` is required).
 
 ## API overview
@@ -185,6 +204,12 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 | POST | `/api/orders` | Customer | Place an order (optional `Idempotency-Key` header) |
 | GET | `/api/orders?page=&size=` | Customer | My orders, newest first |
 | GET | `/api/orders/{id}` | Customer | My order with items and payment |
+| POST | `/api/orders/{id}/cancel` | Customer | Cancel while PLACED/ACCEPTED (`{"reason":"..."}` optional) |
+| GET | `/api/orders/{id}/timeline` | Customer | Tracking: status changes with timestamps and notes |
+| GET | `/api/owner/restaurants/{id}/orders?status=&page=&size=` | Owner | Order queue, oldest first |
+| GET | `/api/owner/restaurants/{id}/orders/{orderId}` | Owner | Order details |
+| PATCH | `/api/owner/restaurants/{id}/orders/{orderId}/status` | Owner | `ACCEPTED`, `REJECTED` (reason required), `PREPARING`, `READY_FOR_PICKUP` |
+| POST | `/api/admin/orders/{id}/cancel` | Admin | Cancel any non-final order (reason required) |
 
 ### Placing an order
 ```bash

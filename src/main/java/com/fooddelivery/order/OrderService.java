@@ -3,6 +3,7 @@ package com.fooddelivery.order;
 import com.fooddelivery.common.error.NotFoundException;
 import com.fooddelivery.common.web.PageResponse;
 import com.fooddelivery.payment.PaymentRepository;
+import com.fooddelivery.restaurant.RestaurantOwnerService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
@@ -11,6 +12,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.resilience.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 @Slf4j
 @Service
@@ -21,12 +24,17 @@ public class OrderService {
     private final OrderPlacementTx placementTx;
     private final OrderRepository orderRepository;
     private final PaymentRepository paymentRepository;
+    private final OrderStatusHistoryRepository historyRepository;
+    private final RestaurantOwnerService restaurantOwnerService;
 
     public OrderService(OrderPlacementTx placementTx, OrderRepository orderRepository,
-                        PaymentRepository paymentRepository) {
+                        PaymentRepository paymentRepository, OrderStatusHistoryRepository historyRepository,
+                        RestaurantOwnerService restaurantOwnerService) {
         this.placementTx = placementTx;
         this.orderRepository = orderRepository;
         this.paymentRepository = paymentRepository;
+        this.historyRepository = historyRepository;
+        this.restaurantOwnerService = restaurantOwnerService;
     }
 
     /**
@@ -61,6 +69,33 @@ public class OrderService {
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id"));
         return PageResponse.from(orderRepository.findByCustomerId(customerId, pageable)
                 .map(OrderSummaryResponse::from));
+    }
+
+    /** Tracking: the order's status changes in time order. */
+    @Transactional(readOnly = true)
+    public List<TimelineEntry> timelineForCustomer(Long orderId, Long customerId) {
+        orderRepository.findWithItemsByIdAndCustomerId(orderId, customerId)
+                .orElseThrow(() -> new NotFoundException("Order", orderId));
+        return historyRepository.findByOrderIdOrderByChangedAtAscIdAsc(orderId).stream()
+                .map(TimelineEntry::from).toList();
+    }
+
+    /** Restaurant queue, oldest first (FIFO: first placed, first handled). */
+    @Transactional(readOnly = true)
+    public PageResponse<OrderSummaryResponse> listForRestaurant(Long restaurantId, Long ownerId, OrderStatus status,
+                                                                int page, int size) {
+        restaurantOwnerService.requireOwned(restaurantId, ownerId);
+        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "createdAt", "id"));
+        return PageResponse.from(orderRepository.findForRestaurant(restaurantId, status, pageable)
+                .map(OrderSummaryResponse::from));
+    }
+
+    @Transactional(readOnly = true)
+    public OrderResponse getForRestaurant(Long restaurantId, Long orderId, Long ownerId) {
+        restaurantOwnerService.requireOwned(restaurantId, ownerId);
+        Order order = orderRepository.findWithItemsByIdAndRestaurantId(orderId, restaurantId)
+                .orElseThrow(() -> new NotFoundException("Order", orderId));
+        return OrderResponse.from(order, paymentRepository.findByOrderId(orderId).orElse(null));
     }
 
     private static boolean isIdempotencyViolation(DataIntegrityViolationException e) {

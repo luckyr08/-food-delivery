@@ -50,11 +50,13 @@ class OrderConcurrencyTest {
 
     final HttpClient http = HttpClient.newHttpClient();
     Long restaurantId;
+    String ownerToken;
 
     @BeforeEach
     void setUp() {
         DatabaseCleaner.clean(jdbc);
         Long ownerId = insertUser("owner@example.com", "RESTAURANT_OWNER");
+        ownerToken = jwtService.issue(AuthUser.fromToken(ownerId, Role.RESTAURANT_OWNER));
         Long cityId = insert("INSERT INTO cities (name, active, created_at, updated_at) "
                 + "VALUES ('Pune', TRUE, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))");
         restaurantId = insert("INSERT INTO restaurants (owner_id, city_id, name, address, is_open, active, "
@@ -108,7 +110,44 @@ class OrderConcurrencyTest {
         assertThat(stock(biryani)).isEqualTo(9);
     }
 
+    /**
+     * Customer cancels while the owner rejects the same PLACED order, at the same instant, 10 rounds.
+     * Both transitions are valid from PLACED, so without protection both could apply their side
+     * effects. @Version makes exactly one win; the loser (409) rolls back, so stock is restored once.
+     */
+    @Test
+    void cancelVsRejectRace_exactlyOneWinsAndStockRestoredOnce() throws Exception {
+        Long biryani = insertMenuItem("Biryani", 100);
+        String customer = customers(1).get(0);
+
+        for (int round = 0; round < 10; round++) {
+            String placed = placeOrder(customer, "[{\"menuItemId\":" + biryani + ",\"quantity\":2}]", null).body();
+            long orderId = Long.parseLong(placed.replaceAll(".*?\"id\":(\\d+).*", "$1"));
+
+            List<HttpResponse<String>> responses = runConcurrently(2, i -> i == 0
+                    ? send("POST", "/api/orders/" + orderId + "/cancel", customer, "{}")
+                    : send("PATCH", "/api/owner/restaurants/" + restaurantId + "/orders/" + orderId + "/status",
+                    ownerToken, "{\"status\":\"REJECTED\",\"reason\":\"Busy\"}"));
+
+            assertThat(responses.stream().map(HttpResponse::statusCode))
+                    .as("round %d", round).containsExactlyInAnyOrder(200, 409);
+        }
+
+        assertThat(stock(biryani)).isEqualTo(100); // every order restored exactly once
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM order_status_history WHERE from_status = 'PLACED'", Integer.class))
+                .isEqualTo(10); // one winning transition per order
+    }
+
     // ---- helpers ----
+
+    private HttpResponse<String> send(String method, String path, String token, String json) throws Exception {
+        return http.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json")
+                .method(method, HttpRequest.BodyPublishers.ofString(json))
+                .build(), HttpResponse.BodyHandlers.ofString());
+    }
 
     private HttpResponse<String> placeOrder(String token, String itemsJson, String idempotencyKey) throws Exception {
         String body = """

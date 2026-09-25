@@ -5,5 +5,7 @@ public enum PaymentStatus {
     PENDING,
     SUCCESS,
     FAILED,
-    REFUNDED
+    REFUNDED,
+    /** Cash-on-delivery order cancelled before delivery: no money ever moved. */
+    VOIDED
 }

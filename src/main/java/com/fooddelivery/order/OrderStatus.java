@@ -1,6 +1,6 @@
 package com.fooddelivery.order;
 
-/** Lifecycle states. Allowed transitions are added with the state machine (step 7). */
+/** Lifecycle states. Allowed transitions and who may perform them: {@link OrderStateMachine}. */
 public enum OrderStatus {
     PLACED,
     ACCEPTED,

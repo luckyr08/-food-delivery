@@ -50,6 +50,26 @@ public class PaymentService {
         return paymentRepository.save(payment);
     }
 
+    /**
+     * Undo the payment of a rejected/cancelled order, inside that transaction as its last step:
+     * if the gateway refund fails, the cancellation fails too and nothing is half-done.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void reverse(Order order) {
+        paymentRepository.findByOrderId(order.getId()).ifPresent(payment -> {
+            switch (payment.getStatus()) {
+                case SUCCESS -> {
+                    gateway.refund(payment.getProviderRef(), payment.getAmount());
+                    payment.setStatus(PaymentStatus.REFUNDED);
+                }
+                case PENDING -> payment.setStatus(PaymentStatus.VOIDED); // COD: nothing was collected
+                default -> {
+                    // FAILED / REFUNDED / VOIDED: nothing to undo
+                }
+            }
+        });
+    }
+
     private void registerRefundOnRollback(String providerRef, Order order) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
