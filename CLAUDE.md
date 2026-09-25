@@ -8,6 +8,7 @@ explain every line in an interview, so the workflow is deliberately slow.
   and pros/cons, and wait for the developer's go-ahead.
 - After writing code, walk through it. The developer reviews the diff and commits themselves.
 - Record every non-trivial decision as an ADR in `docs/decisions/NNNN-title.md`.
+- Every step updates README.md (new endpoints, assumptions, setup changes) in the same commit.
 - Never add features beyond the agreed step.
 
 ## Stack (locked)
