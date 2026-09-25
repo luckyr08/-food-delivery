@@ -34,6 +34,9 @@ app:
     delivery-fee: 40.00
     # Orders with a subtotal at or above this amount get free delivery.
     free-delivery-from: 500.00
+  review:
+    # Customers can review an order for this many days after delivery.
+    window-days: 7
 
 server:
   error:

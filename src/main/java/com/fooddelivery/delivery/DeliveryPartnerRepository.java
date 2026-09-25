@@ -34,6 +34,16 @@ public interface DeliveryPartnerRepository extends JpaRepository<DeliveryPartner
             """)
     int markBusy(Long id);
 
+    /** Atomic increment, same reasoning as RestaurantRepository.addRating. */
+    @Modifying
+    @Query(nativeQuery = true, value = """
+            UPDATE delivery_partners
+            SET rating_sum = rating_sum + :rating, rating_count = rating_count + 1,
+                version = version + 1, updated_at = UTC_TIMESTAMP(6)
+            WHERE id = :id
+            """)
+    int addRating(Long id, int rating);
+
     /** Frees a partner after delivery or when their order is cancelled. */
     @Modifying
     @Query(nativeQuery = true, value = """

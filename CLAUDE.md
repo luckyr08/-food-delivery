@@ -33,7 +33,8 @@ explain every line in an interview, so the workflow is deliberately slow.
 - Take the exclusive lock on a parent row BEFORE writing a child row that references it (insert, or setting
   the FK column): the FK check takes a shared lock on the parent, and S→X upgrades deadlock. Happened twice:
   stock UPDATE before inserting order_items (ADR 0008); markBusy on the partner before setting
-  orders.delivery_partner_id (ADR 0010). Always prove lock ordering with a real concurrency test.
+  orders.delivery_partner_id (ADR 0010); rating increments before inserting the review (ADR 0012).
+  Always prove lock ordering with a real concurrency test.
 - Retry (`@Retryable` on PessimisticLockingFailureException) wraps the transaction from outside and is only
   a safety net, never the fix for a systematic deadlock.
 - "First writer wins" claims (partner assignment) use conditional UPDATE; losers get 409.

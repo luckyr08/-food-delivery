@@ -98,6 +98,13 @@ PLACED ──► ACCEPTED ──► PREPARING ──► READY_FOR_PICKUP ──�
 - Simultaneous changes to one order (e.g. customer cancels while the restaurant rejects) are resolved by
   optimistic locking: one wins, the other gets `409` and none of its side effects apply.
 
+## Ratings & reviews
+Customers review a delivered order once, within 7 days: a required restaurant rating and an optional
+delivery-partner rating. Averages are kept as `rating_sum`/`rating_count` updated with atomic increments
+in the same transaction as the review, so concurrent reviews are never lost and a rejected duplicate never
+counts. Public reviews show only the reviewer's first name; partner ratings stay private
+([ADR 0012](docs/decisions/0012-ratings-and-reviews.md)).
+
 ## Notifications (asynchronous fan-out)
 Every order change (placement, each status transition, partner assignment) publishes an event inside its
 transaction. A listener annotated `@TransactionalEventListener(AFTER_COMMIT)` + `@Async` runs it on a
@@ -131,6 +138,11 @@ the change. Each gets an in-app notification (`/api/notifications`) and a push v
   customer cancel vs restaurant reject on the same order (10 rounds) → one winner each, stock restored once.
   `PartnerClaimConcurrencyTest`: 20 partners claim one order → exactly 1 winner, 19 × 409; one partner claims
   5 orders at once → exactly 1 succeeds.
+  `ReviewConcurrencyTest`: 30 simultaneous reviews of one restaurant → count 30 and exact sum, no deadlocks;
+  the same review submitted 5 times at once → counted once.
+- **Lock-ordering rule** (found by these tests, applied three times): take the exclusive lock on a parent row
+  before writing a child row that references it — the FK check otherwise takes a shared lock first and
+  concurrent S→X upgrades deadlock.
 
 ## Design decisions
 All decisions with alternatives and trade-offs: [`docs/decisions/`](docs/decisions).
@@ -194,6 +206,7 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
   see and claim orders in their own city.
 - Notifications are in-app records plus a logged "push"; no real SMS/email/push provider is integrated.
   They are best effort (lost if the app crashes between commit and sending).
+- Reviews are allowed once per delivered order, within 7 days, and can't be edited.
 - A restaurant must give a reason to reject an order. Orders not handled by the restaurant stay PLACED
   (an auto-reject timeout job is a possible extension).
 - Customers browse within one city (`cityId` is required).
@@ -241,6 +254,9 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 | POST | `/api/partner/orders/{id}/claim` | Partner | Claim an order; first partner wins, others get `409 ORDER_ALREADY_ASSIGNED` |
 | GET | `/api/partner/orders/current` | Partner | My active delivery (`204` if none) |
 | PATCH | `/api/partner/orders/{id}/status` | Partner | `OUT_FOR_DELIVERY` (once ready) / `DELIVERED` |
+| POST | `/api/orders/{id}/review` | Customer | Rate a delivered order: `restaurantRating` 1–5, optional `partnerRating`, `comment` |
+| GET | `/api/orders/{id}/review` | Customer | My review of an order |
+| GET | `/api/restaurants/{id}/reviews?page=&size=` | Public | Restaurant reviews, newest first (first name only) |
 | GET | `/api/notifications?unreadOnly=&page=&size=` | Authenticated | My notifications, newest first |
 | PATCH | `/api/notifications/{id}/read` | Authenticated | Mark one as read |
 | POST | `/api/notifications/read-all` | Authenticated | Mark all as read |

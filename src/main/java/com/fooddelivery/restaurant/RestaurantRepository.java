@@ -4,6 +4,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
@@ -60,4 +61,17 @@ public interface RestaurantRepository extends JpaRepository<Restaurant, Long> {
     @EntityGraph(attributePaths = {"city"})
     @Query("SELECT r FROM Restaurant r WHERE r.id = :id AND r.active = true AND r.city.active = true")
     Optional<Restaurant> findPublicById(Long id);
+
+    /**
+     * Atomic increment: concurrent reviews queue on the row lock and none is lost (no read-modify-write).
+     * Bumps version so an owner/admin entity update loaded before this can't write the old sum back.
+     */
+    @Modifying
+    @Query(nativeQuery = true, value = """
+            UPDATE restaurants
+            SET rating_sum = rating_sum + :rating, rating_count = rating_count + 1,
+                version = version + 1, updated_at = UTC_TIMESTAMP(6)
+            WHERE id = :id
+            """)
+    int addRating(Long id, int rating);
 }
