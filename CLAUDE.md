@@ -30,8 +30,10 @@ explain every line in an interview, so the workflow is deliberately slow.
 - Contended counters (stock, ratings aggregates) are changed with a single conditional
   `UPDATE ... WHERE <guard>` and the affected-row count is checked. No read-modify-save.
 - Multi-row locking happens in ascending id order to avoid deadlocks.
-- Take the exclusive lock on a parent row (e.g. the stock UPDATE on menu_items) BEFORE inserting child rows
-  that reference it: the child's FK check takes a shared lock, and S→X upgrades deadlock (see ADR 0008).
+- Take the exclusive lock on a parent row BEFORE writing a child row that references it (insert, or setting
+  the FK column): the FK check takes a shared lock on the parent, and S→X upgrades deadlock. Happened twice:
+  stock UPDATE before inserting order_items (ADR 0008); markBusy on the partner before setting
+  orders.delivery_partner_id (ADR 0010). Always prove lock ordering with a real concurrency test.
 - Retry (`@Retryable` on PessimisticLockingFailureException) wraps the transaction from outside and is only
   a safety net, never the fix for a systematic deadlock.
 - "First writer wins" claims (partner assignment) use conditional UPDATE; losers get 409.

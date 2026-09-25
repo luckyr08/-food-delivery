@@ -91,6 +91,10 @@ PLACED ──► ACCEPTED ──► PREPARING ──► READY_FOR_PICKUP ──�
 - Reject/cancel refunds the payment (`REFUNDED`, or `VOIDED` for cash on delivery). Stock is returned
   only if the food wasn't cooked yet (cancelled from PLACED/ACCEPTED).
 - Every change is recorded in `order_status_history`, which powers the customer's timeline.
+- **Delivery partners** claim orders in their city from ACCEPTED onwards (so they can travel while the food
+  is prepared). A claim sets the partner BUSY; delivery or cancellation makes them AVAILABLE again.
+  Cash-on-delivery payments are marked SUCCESS on delivery. Customers see the assigned partner's name,
+  phone and vehicle on their order.
 - Simultaneous changes to one order (e.g. customer cancels while the restaurant rejects) are resolved by
   optimistic locking: one wins, the other gets `409` and none of its side effects apply.
 
@@ -103,6 +107,9 @@ PLACED ──► ACCEPTED ──► PREPARING ──► READY_FOR_PICKUP ──�
   `order_items` (whose FK would otherwise take a shared lock first — a deadlock our concurrency test found).
   Deadlocks/lock timeouts are still retried from outside the transaction as a safety net.
 - **Idempotent placement** with an optional `Idempotency-Key`, safe under concurrent duplicates.
+- **Partner contention:** claims use two compare-and-set UPDATEs (partner `AVAILABLE → BUSY`, then order
+  `delivery_partner_id IS NULL → partner`) in one transaction, so exactly one partner gets an order and a
+  partner never holds two ([ADR 0010](docs/decisions/0010-delivery-assignment.md)).
 - **Payment** is charged last inside the transaction (mock gateway); an approved charge is refunded if
   the transaction rolls back afterwards. A Saga with `PENDING_PAYMENT` is the production design
   ([ADR 0008](docs/decisions/0008-order-placement.md)).
@@ -110,6 +117,8 @@ PLACED ──► ACCEPTED ──► PREPARING ──► READY_FOR_PICKUP ──�
   10 units → exactly 10 orders, 40 × 409, final stock 0; opposite item order from 40 threads → no
   deadlocks; 10 identical requests with one idempotency key → one order, stock deducted once;
   customer cancel vs restaurant reject on the same order (10 rounds) → one winner each, stock restored once.
+  `PartnerClaimConcurrencyTest`: 20 partners claim one order → exactly 1 winner, 19 × 409; one partner claims
+  5 orders at once → exactly 1 succeeds.
 
 ## Design decisions
 All decisions with alternatives and trade-offs: [`docs/decisions/`](docs/decisions).
@@ -169,6 +178,8 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 - Payment is simulated by an in-process mock gateway that approves every charge; cash on delivery
   creates a `PENDING` payment settled on delivery.
 - Customers can cancel only before the restaurant starts preparing; admins can cancel later (refund, no restock).
+- Partners claim orders themselves (no geo-based dispatch) and handle one order at a time; they can only
+  see and claim orders in their own city.
 - A restaurant must give a reason to reject an order. Orders not handled by the restaurant stay PLACED
   (an auto-reject timeout job is a possible extension).
 - Customers browse within one city (`cityId` is required).
@@ -210,6 +221,12 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 | GET | `/api/owner/restaurants/{id}/orders/{orderId}` | Owner | Order details |
 | PATCH | `/api/owner/restaurants/{id}/orders/{orderId}/status` | Owner | `ACCEPTED`, `REJECTED` (reason required), `PREPARING`, `READY_FOR_PICKUP` |
 | POST | `/api/admin/orders/{id}/cancel` | Admin | Cancel any non-final order (reason required) |
+| GET | `/api/partner/me` | Partner | Own profile and status |
+| PATCH | `/api/partner/me/status` | Partner | `AVAILABLE` / `OFFLINE` (not while on a delivery) |
+| GET | `/api/partner/orders/available?page=&size=` | Partner | Unassigned orders in my city, oldest first |
+| POST | `/api/partner/orders/{id}/claim` | Partner | Claim an order; first partner wins, others get `409 ORDER_ALREADY_ASSIGNED` |
+| GET | `/api/partner/orders/current` | Partner | My active delivery (`204` if none) |
+| PATCH | `/api/partner/orders/{id}/status` | Partner | `OUT_FOR_DELIVERY` (once ready) / `DELIVERED` |
 
 ### Placing an order
 ```bash

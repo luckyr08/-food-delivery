@@ -70,6 +70,14 @@ public class PaymentService {
         });
     }
 
+    /** Cash on delivery is collected by the partner at the door. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void settleOnDelivery(Order order) {
+        paymentRepository.findByOrderId(order.getId())
+                .filter(p -> p.getStatus() == PaymentStatus.PENDING)
+                .ifPresent(p -> p.setStatus(PaymentStatus.SUCCESS));
+    }
+
     private void registerRefundOnRollback(String providerRef, Order order) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override

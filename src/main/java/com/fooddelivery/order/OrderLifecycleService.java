@@ -3,6 +3,8 @@ package com.fooddelivery.order;
 import com.fooddelivery.common.error.BadRequestException;
 import com.fooddelivery.common.error.ErrorCode;
 import com.fooddelivery.common.error.NotFoundException;
+import com.fooddelivery.delivery.DeliveryPartner;
+import com.fooddelivery.delivery.DeliveryPartnerRepository;
 import com.fooddelivery.menu.MenuItemRepository;
 import com.fooddelivery.payment.PaymentRepository;
 import com.fooddelivery.payment.PaymentService;
@@ -30,11 +32,12 @@ public class OrderLifecycleService {
     private final PaymentService paymentService;
     private final RestaurantOwnerService restaurantOwnerService;
     private final UserRepository userRepository;
+    private final DeliveryPartnerRepository partnerRepository;
 
     public OrderLifecycleService(OrderRepository orderRepository, OrderStatusHistoryRepository historyRepository,
                                  MenuItemRepository menuItemRepository, PaymentRepository paymentRepository,
                                  PaymentService paymentService, RestaurantOwnerService restaurantOwnerService,
-                                 UserRepository userRepository) {
+                                 UserRepository userRepository, DeliveryPartnerRepository partnerRepository) {
         this.orderRepository = orderRepository;
         this.historyRepository = historyRepository;
         this.menuItemRepository = menuItemRepository;
@@ -42,6 +45,7 @@ public class OrderLifecycleService {
         this.paymentService = paymentService;
         this.restaurantOwnerService = restaurantOwnerService;
         this.userRepository = userRepository;
+        this.partnerRepository = partnerRepository;
     }
 
     // ---- entry points per role ----
@@ -59,6 +63,16 @@ public class OrderLifecycleService {
         Order order = orderRepository.findWithItemsByIdAndCustomerId(orderId, customerId)
                 .orElseThrow(() -> new NotFoundException("Order", orderId));
         return transition(order, OrderStatus.CANCELLED, customerId, Role.CUSTOMER, reason);
+    }
+
+    /** Pickup and delivery; only the partner assigned to the order may do this. */
+    @Transactional
+    public OrderResponse partnerUpdate(Long orderId, Long partnerUserId, OrderStatus to) {
+        DeliveryPartner partner = partnerRepository.findByUserId(partnerUserId)
+                .orElseThrow(() -> new NotFoundException("Delivery partner profile for user", partnerUserId));
+        Order order = orderRepository.findWithItemsByIdAndDeliveryPartnerId(orderId, partner.getId())
+                .orElseThrow(() -> new NotFoundException("Order", orderId));
+        return transition(order, to, partnerUserId, Role.DELIVERY_PARTNER, null);
     }
 
     @Transactional
@@ -82,10 +96,18 @@ public class OrderLifecycleService {
         // Flush now so the @Version check (UPDATE ... WHERE version = ?) runs before any side effect.
         orderRepository.flush();
 
+        // Releasing locks orders (flushed above) then the partner. A claim locks partner then order, but only
+        // continues past the partner if they were AVAILABLE, while we only release a BUSY partner — so the
+        // two can never wait on each other.
+        if (to == OrderStatus.DELIVERED) {
+            paymentService.settleOnDelivery(order); // COD collected at the door
+            releasePartner(order);
+        }
         if (to == OrderStatus.REJECTED || to == OrderStatus.CANCELLED) {
             if (OrderStateMachine.restocksOnCancel(from)) {
                 restock(order);
             }
+            releasePartner(order); // keeps delivery_partner_id on the order as a record
             paymentService.reverse(order); // last: an external call
         }
 
@@ -98,6 +120,12 @@ public class OrderLifecycleService {
         historyRepository.save(history);
 
         return OrderResponse.from(order, paymentRepository.findByOrderId(order.getId()).orElse(null));
+    }
+
+    private void releasePartner(Order order) {
+        if (order.getDeliveryPartner() != null) {
+            partnerRepository.markAvailable(order.getDeliveryPartner().getId());
+        }
     }
 
     /** Same ascending-id lock order as placement, so restock and placement can't deadlock. */
