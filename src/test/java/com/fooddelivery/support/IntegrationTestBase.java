@@ -132,4 +132,12 @@ public abstract class IntegrationTestBase {
                 {"ownerId":%d,"cityId":%d,"name":"%s","address":"1 Test Road","cuisine":"Indian"}
                 """.formatted(ownerId, cityId, name)).andExpect(status().isCreated()), "$.id");
     }
+
+    /** stock null = unlimited. */
+    protected Long createMenuItem(String ownerToken, Long restaurantId, String name, String price, Integer stock)
+            throws Exception {
+        return idFrom(postAs(ownerToken, "/api/owner/restaurants/" + restaurantId + "/menu-items", """
+                {"name":"%s","category":"Mains","price":%s,"stock":%s}
+                """.formatted(name, price, stock)).andExpect(status().isCreated()), "$.id");
+    }
 }

@@ -27,5 +27,6 @@ public enum ErrorCode {
     // cities / restaurants
     CITY_ALREADY_EXISTS,
     CITY_INACTIVE,
-    INVALID_OWNER
+    INVALID_OWNER,
+    RESTAURANT_INACTIVE
 }

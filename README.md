@@ -129,6 +129,11 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 - Deactivating a city hides it and its restaurants from browsing but doesn't modify them; deactivating a
   restaurant also closes it. Orders already in progress are unaffected.
 - A delivery partner's availability status is controlled by the partner, not the admin.
+- Only the owner edits a menu; the admin controls restaurants by (de)activating them.
+- Owners set stock as an absolute number ("25 left"); customers never see stock numbers, only whether an
+  item is available. Sold-out items remain listed as unavailable.
+- Accessing another owner's restaurant or menu item returns 404, never 403.
+- Customers browse within one city (`cityId` is required).
 
 ## API overview
 | Method | Path | Access | Description |
@@ -148,6 +153,16 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 | PATCH | `/api/admin/delivery-partners/{id}` | Admin | Change city / vehicle |
 | GET | `/api/admin/delivery-partners?cityId=&status=&page=&size=` | Admin | Paginated search |
 | PATCH | `/api/admin/users/{id}/status` | Admin | Block / unblock any account |
+| GET | `/api/owner/restaurants` | Owner | My restaurants |
+| PATCH | `/api/owner/restaurants/{id}/status` | Owner | Open / close (`{"open":true}`) |
+| GET | `/api/owner/restaurants/{id}/menu-items` | Owner | My menu incl. unavailable items, with stock |
+| POST | `/api/owner/restaurants/{id}/menu-items` | Owner | Add item (`stock` omitted/null = unlimited) |
+| PATCH | `/api/owner/restaurants/{id}/menu-items/{itemId}` | Owner | Update name, description, category, price, veg, available |
+| PUT | `/api/owner/restaurants/{id}/menu-items/{itemId}/stock` | Owner | Set stock (`{"stock":25}` or `{"stock":null}` = unlimited) |
+| DELETE | `/api/owner/restaurants/{id}/menu-items/{itemId}` | Owner | Remove item (soft delete) |
+| GET | `/api/restaurants?cityId=&q=&cuisine=&openOnly=&page=&size=` | Public | Browse a city's restaurants (open first) |
+| GET | `/api/restaurants/{id}` | Public | Restaurant details |
+| GET | `/api/restaurants/{id}/menu?category=&vegOnly=` | Public | Menu with `available` flag (no stock numbers) |
 
 Paginated responses have the shape `{content, page, size, totalElements, totalPages}`; `page` starts at 0,
 `size` is 1–100 (default 20). Sorting is fixed server-side.

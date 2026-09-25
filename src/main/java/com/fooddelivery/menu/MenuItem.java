@@ -53,4 +53,9 @@ public class MenuItem extends AuditedEntity {
 
     @Version
     private long version;
+
+    /** Can a customer order it right now? Owner toggle + not deleted + stock left (null = unlimited). */
+    public boolean isOrderable() {
+        return active && available && (stock == null || stock > 0);
+    }
 }
