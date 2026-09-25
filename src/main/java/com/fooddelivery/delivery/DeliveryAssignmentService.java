@@ -6,10 +6,12 @@ import com.fooddelivery.common.error.ErrorCode;
 import com.fooddelivery.common.error.NotFoundException;
 import com.fooddelivery.common.web.PageResponse;
 import com.fooddelivery.order.Order;
+import com.fooddelivery.order.OrderEvent;
 import com.fooddelivery.order.OrderRepository;
 import com.fooddelivery.order.OrderResponse;
 import com.fooddelivery.order.OrderStatus;
 import com.fooddelivery.payment.PaymentRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -32,12 +34,14 @@ public class DeliveryAssignmentService {
     private final DeliveryPartnerRepository partnerRepository;
     private final OrderRepository orderRepository;
     private final PaymentRepository paymentRepository;
+    private final ApplicationEventPublisher events;
 
     public DeliveryAssignmentService(DeliveryPartnerRepository partnerRepository, OrderRepository orderRepository,
-                                     PaymentRepository paymentRepository) {
+                                     PaymentRepository paymentRepository, ApplicationEventPublisher events) {
         this.partnerRepository = partnerRepository;
         this.orderRepository = orderRepository;
         this.paymentRepository = paymentRepository;
+        this.events = events;
     }
 
     // ---- partner profile / availability ----
@@ -113,6 +117,7 @@ public class DeliveryAssignmentService {
 
         // claim() cleared the persistence context, so this reads the updated row.
         Order claimed = orderRepository.findWithItemsById(orderId).orElseThrow();
+        events.publishEvent(OrderEvent.of(OrderEvent.Kind.PARTNER_ASSIGNED, claimed, claimed.getStatus(), userId, null));
         return OrderResponse.from(claimed, paymentRepository.findByOrderId(orderId).orElse(null));
     }
 

@@ -12,6 +12,7 @@ import com.fooddelivery.payment.PaymentService;
 import com.fooddelivery.restaurant.Restaurant;
 import com.fooddelivery.restaurant.RestaurantBrowseService;
 import com.fooddelivery.user.UserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,11 +40,13 @@ class OrderPlacementTx {
     private final UserRepository userRepository;
     private final PaymentService paymentService;
     private final OrderProperties orderProperties;
+    private final ApplicationEventPublisher events;
 
     OrderPlacementTx(OrderRepository orderRepository, OrderStatusHistoryRepository historyRepository,
                      MenuItemRepository menuItemRepository, PaymentRepository paymentRepository,
                      RestaurantBrowseService restaurantBrowseService, UserRepository userRepository,
-                     PaymentService paymentService, OrderProperties orderProperties) {
+                     PaymentService paymentService, OrderProperties orderProperties,
+                     ApplicationEventPublisher events) {
         this.orderRepository = orderRepository;
         this.historyRepository = historyRepository;
         this.menuItemRepository = menuItemRepository;
@@ -52,6 +55,7 @@ class OrderPlacementTx {
         this.userRepository = userRepository;
         this.paymentService = paymentService;
         this.orderProperties = orderProperties;
+        this.events = events;
     }
 
     @Transactional
@@ -132,6 +136,9 @@ class OrderPlacementTx {
 
         // 8 + 9. Charge last, once nothing else can fail for business reasons.
         Payment payment = paymentService.charge(order, request.paymentMethod());
+
+        // Delivered to listeners only if this transaction commits (a declined payment sends nothing).
+        events.publishEvent(OrderEvent.of(OrderEvent.Kind.STATUS_CHANGED, order, null, customerId, null));
 
         return new PlacementResult(OrderResponse.from(order, payment), false);
     }

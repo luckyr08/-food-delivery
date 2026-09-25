@@ -104,6 +104,12 @@
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!-- Polling assertions for async behaviour (version managed by Spring Boot) -->
+		<dependency>
+			<groupId>org.awaitility</groupId>
+			<artifactId>awaitility</artifactId>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>

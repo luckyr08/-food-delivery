@@ -98,6 +98,18 @@ PLACED ──► ACCEPTED ──► PREPARING ──► READY_FOR_PICKUP ──�
 - Simultaneous changes to one order (e.g. customer cancels while the restaurant rejects) are resolved by
   optimistic locking: one wins, the other gets `409` and none of its side effects apply.
 
+## Notifications (asynchronous fan-out)
+Every order change (placement, each status transition, partner assignment) publishes an event inside its
+transaction. A listener annotated `@TransactionalEventListener(AFTER_COMMIT)` + `@Async` runs it on a
+dedicated `notify-*` thread pool **only after the transaction commits**, so:
+- the HTTP request never waits for notifications (proved by a test with a 2-second sender);
+- rolled-back work (e.g. a declined payment) never produces notifications.
+
+The customer, restaurant owner and assigned partner are notified — everyone involved except whoever made
+the change. Each gets an in-app notification (`/api/notifications`) and a push via `NotificationSender`
+(a logging stub). Delivery is best effort; a transactional outbox is the production upgrade
+([ADR 0011](docs/decisions/0011-async-notifications.md)).
+
 ## Concurrency & consistency
 - **No overselling:** stock is decremented with a single conditional `UPDATE ... WHERE stock >= :qty`
   (row lock + check + write in one statement); 0 rows affected → `409 INSUFFICIENT_STOCK`.
@@ -180,6 +192,8 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 - Customers can cancel only before the restaurant starts preparing; admins can cancel later (refund, no restock).
 - Partners claim orders themselves (no geo-based dispatch) and handle one order at a time; they can only
   see and claim orders in their own city.
+- Notifications are in-app records plus a logged "push"; no real SMS/email/push provider is integrated.
+  They are best effort (lost if the app crashes between commit and sending).
 - A restaurant must give a reason to reject an order. Orders not handled by the restaurant stay PLACED
   (an auto-reject timeout job is a possible extension).
 - Customers browse within one city (`cityId` is required).
@@ -227,6 +241,9 @@ only their own orders). Browsing (`GET /api/cities/**`, `GET /api/restaurants/**
 | POST | `/api/partner/orders/{id}/claim` | Partner | Claim an order; first partner wins, others get `409 ORDER_ALREADY_ASSIGNED` |
 | GET | `/api/partner/orders/current` | Partner | My active delivery (`204` if none) |
 | PATCH | `/api/partner/orders/{id}/status` | Partner | `OUT_FOR_DELIVERY` (once ready) / `DELIVERED` |
+| GET | `/api/notifications?unreadOnly=&page=&size=` | Authenticated | My notifications, newest first |
+| PATCH | `/api/notifications/{id}/read` | Authenticated | Mark one as read |
+| POST | `/api/notifications/read-all` | Authenticated | Mark all as read |
 
 ### Placing an order
 ```bash
@@ -263,8 +280,10 @@ curl -X POST localhost:8080/api/admin/delivery-partners -H "Authorization: Beare
 - **Web slice tests** (`@WebMvcTest`): error-contract mapping in `GlobalExceptionHandlerTest`.
 - **Integration tests** (`@SpringBootTest` + MockMvc + real MySQL): extend `IntegrationTestBase`, which
   empties all tables before each test ([ADR 0005](docs/decisions/0005-integration-test-isolation.md)).
-- **Concurrency tests** (`OrderConcurrencyTest`): real embedded server on a random port, many threads
-  released together by a `CountDownLatch`, asserting final DB state.
+- **Concurrency tests** (`OrderConcurrencyTest`, `PartnerClaimConcurrencyTest`): real embedded server on a
+  random port, many threads released together by a `CountDownLatch`, asserting final DB state.
+- **Async tests** use Awaitility (poll until a condition holds) instead of sleeps; every test waits for the
+  notification pool to be idle before the next one cleans the database.
 
 ## AI workflow
 Developed with Claude Code. Working agreement: [`CLAUDE.md`](CLAUDE.md).

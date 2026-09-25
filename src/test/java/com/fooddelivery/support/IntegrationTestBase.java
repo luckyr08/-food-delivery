@@ -1,13 +1,16 @@
 package com.fooddelivery.support;
 
 import com.jayway.jsonpath.JsonPath;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -35,6 +38,15 @@ public abstract class IntegrationTestBase {
 
     @Autowired
     protected JdbcTemplate jdbc;
+
+    @Autowired
+    @Qualifier("notificationExecutor")
+    protected ThreadPoolTaskExecutor notificationExecutor;
+
+    @AfterEach
+    protected void awaitAsyncWork() {
+        AsyncTestSupport.awaitIdle(notificationExecutor);
+    }
 
     @BeforeEach
     void cleanDatabase() {

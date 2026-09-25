@@ -3,11 +3,14 @@ package com.fooddelivery.support;
 import com.fooddelivery.security.AuthUser;
 import com.fooddelivery.security.JwtService;
 import com.fooddelivery.user.Role;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -48,6 +51,15 @@ public abstract class ConcurrencyTestBase {
     protected Long cityId;
     protected Long restaurantId;
     protected String ownerToken;
+
+    @Autowired
+    @Qualifier("notificationExecutor")
+    protected ThreadPoolTaskExecutor notificationExecutor;
+
+    @AfterEach
+    protected void awaitAsyncWork() {
+        AsyncTestSupport.awaitIdle(notificationExecutor);
+    }
 
     @BeforeEach
     void setUpBaseData() {

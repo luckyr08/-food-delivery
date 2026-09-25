@@ -51,5 +51,9 @@ class OrderPaymentFailureIntegrationTest extends IntegrationTestBase {
                 .isEqualTo(5);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM orders", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payments", Integer.class)).isZero();
+
+        // The event was published inside the rolled-back transaction, so AFTER_COMMIT listeners never ran.
+        awaitAsyncWork();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notifications", Integer.class)).isZero();
     }
 }

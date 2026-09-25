@@ -11,6 +11,7 @@ import com.fooddelivery.payment.PaymentService;
 import com.fooddelivery.restaurant.RestaurantOwnerService;
 import com.fooddelivery.user.Role;
 import com.fooddelivery.user.UserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,11 +34,13 @@ public class OrderLifecycleService {
     private final RestaurantOwnerService restaurantOwnerService;
     private final UserRepository userRepository;
     private final DeliveryPartnerRepository partnerRepository;
+    private final ApplicationEventPublisher events;
 
     public OrderLifecycleService(OrderRepository orderRepository, OrderStatusHistoryRepository historyRepository,
                                  MenuItemRepository menuItemRepository, PaymentRepository paymentRepository,
                                  PaymentService paymentService, RestaurantOwnerService restaurantOwnerService,
-                                 UserRepository userRepository, DeliveryPartnerRepository partnerRepository) {
+                                 UserRepository userRepository, DeliveryPartnerRepository partnerRepository,
+                                 ApplicationEventPublisher events) {
         this.orderRepository = orderRepository;
         this.historyRepository = historyRepository;
         this.menuItemRepository = menuItemRepository;
@@ -46,6 +49,7 @@ public class OrderLifecycleService {
         this.restaurantOwnerService = restaurantOwnerService;
         this.userRepository = userRepository;
         this.partnerRepository = partnerRepository;
+        this.events = events;
     }
 
     // ---- entry points per role ----
@@ -119,6 +123,7 @@ public class OrderLifecycleService {
         history.setNote(reason == null || reason.isBlank() ? null : reason.trim());
         historyRepository.save(history);
 
+        events.publishEvent(OrderEvent.of(OrderEvent.Kind.STATUS_CHANGED, order, from, actorId, history.getNote()));
         return OrderResponse.from(order, paymentRepository.findByOrderId(order.getId()).orElse(null));
     }
 
