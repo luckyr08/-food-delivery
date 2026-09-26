@@ -49,6 +49,11 @@ app:
     # Customers can review an order for this many days after delivery.
     window-days: 7
   payment:
+    webhook:
+      # Shared secret for the gateway's HMAC-SHA256 webhook signature. Override outside local dev.
+      secret: ${PAYMENT_WEBHOOK_SECRET:local-dev-webhook-secret}
+      # Reject signatures older than this (replay protection).
+      tolerance-seconds: 300
     # Orders stuck in PAYMENT_PENDING are checked with the gateway, then completed or cancelled.
     reservation-expiry-minutes: 15
     reconciler:

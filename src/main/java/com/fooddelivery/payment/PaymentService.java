@@ -71,6 +71,18 @@ public class PaymentService {
         });
     }
 
+    /**
+     * The gateway captured money for an order we had already cancelled (e.g. reservation expired before the
+     * capture arrived). Nothing to deliver, so the money goes back: refund via the outbox.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void refundLateCapture(Order order, String providerRef) {
+        Payment payment = require(order);
+        payment.setProviderRef(providerRef);
+        payment.setStatus(PaymentStatus.REFUND_PENDING);
+        outboxWriter.paymentRefundRequested(payment.getId());
+    }
+
     /** Cash on delivery is collected by the partner at the door. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void settleOnDelivery(Order order) {

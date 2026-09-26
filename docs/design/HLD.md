@@ -46,6 +46,7 @@ flowchart LR
     RELAY -->|versioned upserts| IDX[(Search index<br/>Elasticsearch port)]
     WEB -->|search queries| IDX
     CORE -->|charge / refund| PG[Payment gateway<br/>mock]
+    PG -->|signed webhook| WEB
     ASYNC -->|push| PUSH[Push / SMS provider<br/>logging stub]
 ```
 

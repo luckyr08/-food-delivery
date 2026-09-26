@@ -41,6 +41,8 @@ public class SecurityConfig {
                         // Browsing is public, like real food apps; ordering requires login.
                         .requestMatchers(HttpMethod.GET, "/api/cities/**", "/api/restaurants/**", "/api/search/**").permitAll()
                         .requestMatchers("/error").permitAll()
+                        // Called by the payment gateway, authenticated by HMAC signature instead of a JWT.
+                        .requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/owner/**").hasRole("RESTAURANT_OWNER")
                         .requestMatchers("/api/partner/**").hasRole("DELIVERY_PARTNER")

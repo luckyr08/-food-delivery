@@ -26,6 +26,7 @@ notifications** delivered only after commit; and **ratings & reviews**.
 - [Concurrency & consistency](#concurrency--consistency)
 - [Notifications (asynchronous fan-out)](#notifications-asynchronous-fan-out)
 - [Ratings & reviews](#ratings--reviews)
+- [Payment webhook](#payment-webhook)
 - [Search (Elasticsearch port, outbox sync)](#search-elasticsearch-port-outbox-sync)
 - [Error handling](#error-handling)
 - [API overview](#api-overview)
@@ -204,6 +205,21 @@ in the same transaction as the review, so concurrent reviews are never lost and 
 counts. Public reviews show only the reviewer's first name; partner ratings stay private
 ([ADR 0012](docs/decisions/0012-ratings-and-reviews.md)).
 
+## Payment webhook
+The gateway confirms payments with `POST /api/payments/webhook` — the primary confirmation for asynchronous
+methods (UPI, 3-D Secure); the synchronous charge response and the reconciler are fallbacks, and all three
+converge on the same idempotent steps. Authenticated by `X-Signature: t=<unix>,v1=<HMAC-SHA256(secret, t + "." + body)>`
+(secret: `PAYMENT_WEBHOOK_SECRET`), 5-minute replay window, event ids deduplicated, late captures for
+cancelled orders refunded automatically, amount mismatches rejected (422). Try it as "the gateway":
+
+```bash
+BODY='{"eventId":"evt_demo_1","type":"payment.captured","orderReference":"<orderId>","providerRef":"pay_demo_1","amount":<totalAmount>}'
+T=$(date +%s)
+SIG=$(printf '%s' "$T.$BODY" | openssl dgst -sha256 -hmac 'local-dev-webhook-secret' | sed 's/^.* //')
+curl -X POST localhost:8080/api/payments/webhook -H 'Content-Type: application/json' \
+  -H "X-Signature: t=$T,v1=$SIG" -d "$BODY"
+```
+
 ## Search (Elasticsearch port, outbox sync)
 Typo-tolerant search over restaurant names, cuisine **and dishes** (`/api/search/restaurants?cityId=1&q=biryni`),
 with the dishes that matched, plus autocomplete (`/api/search/suggest`).
@@ -299,6 +315,7 @@ Details: [ADR 0004](docs/decisions/0004-error-handling.md).
 | POST | `/api/orders/{id}/review` | Customer | Rate a delivered order: `restaurantRating` 1–5, optional `partnerRating`, `comment` |
 | GET | `/api/orders/{id}/review` | Customer | My review of an order |
 | GET | `/api/restaurants/{id}/reviews?page=&size=` | Public | Restaurant reviews, newest first (first name only) |
+| POST | `/api/payments/webhook` | Gateway (HMAC signature) | Payment captured / failed / refund processed |
 | GET | `/api/search/restaurants?cityId=&q=&cuisine=&vegOnly=&openOnly=&page=&size=` | Public | Typo-tolerant search incl. dishes |
 | GET | `/api/search/suggest?cityId=&q=` | Public | Autocomplete |
 | POST | `/api/admin/search/reindex` | Admin | Rebuild the index from MySQL |
@@ -394,7 +411,7 @@ What I'd change for real production load, roughly in order:
 | Area | Now | Production |
 |---|---|---|
 | Notifications | In-memory after-commit events (best effort) | Move onto the outbox already built for search ([ADR 0013](docs/decisions/0013-search-index-and-outbox.md)), or outbox → Kafka |
-| Payment | Saga: reserve → charge outside transactions → confirm / compensate; reconciler; refunds via outbox ([ADR 0015](docs/decisions/0015-payment-saga.md)) | Signed gateway webhooks for asynchronous methods (UPI, 3-D Secure) |
+| Payment | Saga: reserve → charge outside transactions → confirm / compensate; signed webhooks; reconciler; refunds via outbox ([ADR 0015](docs/decisions/0015-payment-saga.md)) | Real gateway adapter (Razorpay/Stripe) behind the same interface; secret rotation |
 | Browsing / menus | Direct DB reads; search via an ES-shaped port with an in-memory adapter, synced by an outbox | Real Elasticsearch adapter behind the same port; CDC (Debezium) instead of the outbox at larger scale; Redis cache for menus |
 | Orders table | Single table | Partition/archive by date; move history to cheaper storage |
 | Hot items (flash sales) | Row-lock serialisation, protected by the bulkhead | Redis stock gate before MySQL, or stock split into bucket rows |

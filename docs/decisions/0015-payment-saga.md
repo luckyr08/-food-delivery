@@ -29,8 +29,14 @@ Tx2 (ms):   approved → payment SUCCESS, order PLACED, restaurant notified
 - New `OrderStatus.PAYMENT_PENDING` (hidden from restaurants; only `SYSTEM` may resolve it), `PaymentStatus`
   `INITIATED` and `REFUND_PENDING`, pseudo-role `SYSTEM` (never assigned to an account).
 - Cash on delivery: no gateway, PLACED in Tx1.
-- Real gateways (UPI, 3-D Secure) are asynchronous: a signed webhook would call the same completion step —
-  documented, not built.
+- **Webhook** `POST /api/payments/webhook` (the primary confirmation for asynchronous methods like UPI and
+  3-D Secure): HMAC-SHA256 over `timestamp.rawBody` with a shared secret, constant-time compare, 5-minute
+  timestamp window (replay protection); event ids stored in `payment_webhook_event` (V6) so redeliveries are
+  no-ops; `payment.captured` / `payment.failed` / `refund.processed`. A capture arriving after we cancelled
+  the order is refunded automatically via the outbox; a captured amount that doesn't match the order total
+  → 422, order left pending. Webhook, synchronous response and reconciler converge on the same idempotent
+  steps; `PaymentWebhookRaceTest` (webhook + reconciler at the same instant, 10 rounds) → exactly one
+  completion each.
 
 ## Verified (`PaymentSagaIntegrationTest`)
 The gateway mock asserts no transaction is active while it is called; decline → CANCELLED + FAILED + stock
