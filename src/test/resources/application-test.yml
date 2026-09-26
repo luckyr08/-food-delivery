@@ -7,6 +7,13 @@ spring:
     clean-disabled: false
 
 app:
+  order:
+    # Existing tests place many orders per customer and fire bursts; spike/limit tests override these.
+    admission:
+      acquire-timeout-ms: 10000
+    rate-limit:
+      capacity: 1000
+      refill-per-minute: 1000
   outbox:
     relay:
       # Tests drive the relay explicitly (OutboxRelay.drain()) for deterministic assertions.

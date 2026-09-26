@@ -132,6 +132,15 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void lockTimeoutBecomes503WithRetryAfter() throws Exception {
+        mvc.perform(get("/test/lock-timeout"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("SERVICE_BUSY"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Retry-After", "2"));
+    }
+
+    @Test
     void unknownUrlReturns404ProblemDetail() throws Exception {
         mvc.perform(get("/test/does-not-exist"))
                 .andExpect(status().isNotFound())
@@ -186,6 +195,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/bad-credentials")
         void badCredentials() {
             throw new org.springframework.security.authentication.BadCredentialsException("Bad credentials");
+        }
+
+        @GetMapping("/test/lock-timeout")
+        void lockTimeout() {
+            throw new org.springframework.dao.CannotAcquireLockException("Lock wait timeout exceeded");
         }
 
         @GetMapping("/test/boom")

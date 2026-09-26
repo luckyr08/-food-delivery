@@ -3,6 +3,7 @@ package com.fooddelivery.common.error;
 import com.fooddelivery.security.JwtAuthenticationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -45,6 +46,22 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleApiException(ApiException ex) {
         log.warn("{} {}: {}", ex.getStatus().value(), ex.getCode(), ex.getMessage());
         return problem(ex.getStatus(), ex.getCode(), ex.getMessage());
+    }
+
+    /** 503/429 with Retry-After, so well-behaved clients back off instead of hammering. */
+    @ExceptionHandler(RetryLaterException.class)
+    public ResponseEntity<ProblemDetail> handleRetryLater(RetryLaterException ex) {
+        log.warn("{} {}: {}", ex.getStatus().value(), ex.getCode(), ex.getMessage());
+        return ResponseEntity.status(ex.getStatus())
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
+                .body(problem(ex.getStatus(), ex.getCode(), ex.getMessage()));
+    }
+
+    /** Lock wait timeout / deadlock that survived the retry: the DB is overloaded, so 503, not 500. */
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<ProblemDetail> handleLockFailure(PessimisticLockingFailureException ex) {
+        return handleRetryLater(new RetryLaterException(HttpStatus.SERVICE_UNAVAILABLE, ErrorCode.SERVICE_BUSY,
+                "The system is busy, please retry shortly", 2));
     }
 
     // ---- security ----

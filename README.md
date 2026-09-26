@@ -8,6 +8,8 @@ notifications** delivered only after commit; and **ratings & reviews**.
 **Highlights**
 - Atomic order placement (stock + order + payment in one transaction), proven with 50 concurrent buyers
   for 10 units → exactly 10 orders.
+- Order spikes are shed gracefully: a bulkhead + rate limit keep MySQL safe (200 simultaneous orders →
+  every caller answered in < 1 s, 0 errors, no oversell).
 - Three deadlocks found by real concurrency tests and fixed at the root cause (see
   [Concurrency & consistency](#concurrency--consistency)).
 - 12 ADRs documenting every decision with alternatives and evidence; 160+ tests against real MySQL.
@@ -243,6 +245,8 @@ Every error is an [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9
 | 403 | Authenticated but role not allowed |
 | 404 | Not found — also returned for resources owned by someone else, so their existence isn't leaked |
 | 409 | Valid request but the current state forbids it (out of stock, invalid status transition, concurrent update) |
+| 429 | Too many orders from one customer (`RATE_LIMITED`, with `Retry-After`) |
+| 503 | Ordering temporarily overloaded (`SERVICE_BUSY`, with `Retry-After`) |
 | 500 | Unexpected error; generic message, details only in server logs |
 
 Details: [ADR 0004](docs/decisions/0004-error-handling.md).
@@ -376,6 +380,12 @@ curl -X POST localhost:8080/api/admin/delivery-partners -H "Authorization: Beare
 - Customers browse within one city (`cityId` is required).
 
 ## Scaling to production
+**Built for order spikes** ([ADR 0014](docs/decisions/0014-order-spike-protection.md)): a per-instance
+bulkhead (16 concurrent placements, then fast `503 SERVICE_BUSY` + `Retry-After`), a per-customer rate limit
+(`429 RATE_LIMITED`), fail-fast pool/lock timeouts, and lock failures mapped to 503. `OrderSpikeTest`:
+200 simultaneous orders → DB never sees more than the bulkhead allows, every caller answered in < 1 s, 0 × 500,
+no oversell.
+
 What I'd change for real production load, roughly in order:
 
 | Area | Now | Production |
@@ -384,7 +394,8 @@ What I'd change for real production load, roughly in order:
 | Payment | Charged inside the placement transaction (mock gateway) + refund on rollback | Saga: `PENDING_PAYMENT` → gateway → confirm / compensate; webhook reconciliation ([ADR 0008](docs/decisions/0008-order-placement.md)) |
 | Browsing / menus | Direct DB reads; search via an ES-shaped port with an in-memory adapter, synced by an outbox | Real Elasticsearch adapter behind the same port; CDC (Debezium) instead of the outbox at larger scale; Redis cache for menus |
 | Orders table | Single table | Partition/archive by date; move history to cheaper storage |
-| Hot items (flash sales) | Row-lock serialisation on the item | Pre-sharded stock counters or Redis reservations reconciled to the DB |
+| Hot items (flash sales) | Row-lock serialisation, protected by the bulkhead | Redis stock gate before MySQL, or stock split into bucket rows |
+| Write spikes | Bulkhead + rate limit shed excess load | Async intake (Kafka, `202 Accepted`), shard orders by city, ProxySQL |
 | Assignment | Partners claim within their city | Geo-based dispatch (nearest partner, offer + timeout), ETA |
 | Auth | 60-min access tokens, no revocation | Refresh tokens, revocation list / token version, rate limiting and lockout |
 | Operations | Logs only | Metrics (queue depth, deadlock/409 rates), tracing, alerting — out of scope for this assignment |

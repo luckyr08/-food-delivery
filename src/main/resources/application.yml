@@ -9,6 +9,10 @@ spring:
     password: ${DB_PASSWORD:food_app_pwd}
     hikari:
       maximum-pool-size: 20
+      # Fail fast instead of queueing for 30 s (Hikari default) when the pool is exhausted.
+      connection-timeout: 2000
+      # Row-lock waits give up after 5 s (MySQL default 50 s) -> retried once, then 503 SERVICE_BUSY.
+      connection-init-sql: SET SESSION innodb_lock_wait_timeout = 5
 
   jpa:
     # Schema is owned by Flyway; Hibernate only checks entities match the tables.
@@ -34,6 +38,13 @@ app:
     delivery-fee: 40.00
     # Orders with a subtotal at or above this amount get free delivery.
     free-delivery-from: 500.00
+    admission:
+      # Concurrent placements per instance; keep below the DB pool size (20) to leave room for other work.
+      max-concurrent: 16
+      acquire-timeout-ms: 200
+    rate-limit:
+      capacity: 5
+      refill-per-minute: 5
   review:
     # Customers can review an order for this many days after delivery.
     window-days: 7

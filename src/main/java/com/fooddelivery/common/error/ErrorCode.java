@@ -18,6 +18,8 @@ public enum ErrorCode {
     CONFLICT,
     DATA_INTEGRITY_VIOLATION,
     CONCURRENT_MODIFICATION,
+    SERVICE_BUSY,
+    RATE_LIMITED,
     INTERNAL_ERROR,
 
     // auth / users

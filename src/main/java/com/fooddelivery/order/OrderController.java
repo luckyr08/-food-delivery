@@ -31,10 +31,15 @@ public class OrderController {
 
     private final OrderService orderService;
     private final OrderLifecycleService lifecycleService;
+    private final OrderRateLimiter rateLimiter;
+    private final OrderAdmissionControl admission;
 
-    public OrderController(OrderService orderService, OrderLifecycleService lifecycleService) {
+    public OrderController(OrderService orderService, OrderLifecycleService lifecycleService,
+                           OrderRateLimiter rateLimiter, OrderAdmissionControl admission) {
         this.orderService = orderService;
         this.lifecycleService = lifecycleService;
+        this.rateLimiter = rateLimiter;
+        this.admission = admission;
     }
 
     /** 201 for a new order; 200 + Idempotent-Replayed: true when the key matched an earlier one. */
@@ -43,7 +48,9 @@ public class OrderController {
             @AuthenticationPrincipal AuthUser me,
             @RequestHeader(name = IDEMPOTENCY_KEY, required = false) @Size(min = 8, max = 64) String idempotencyKey,
             @Valid @RequestBody PlaceOrderRequest request) {
-        PlacementResult result = orderService.placeOrder(me.id(), request, idempotencyKey);
+        // Cheapest checks first: per-customer rate limit (429), then the bulkhead that protects the DB (503).
+        rateLimiter.check(me.id());
+        PlacementResult result = admission.admit(() -> orderService.placeOrder(me.id(), request, idempotencyKey));
         if (result.replayed()) {
             return ResponseEntity.ok().header(REPLAYED, "true").body(result.order());
         }
