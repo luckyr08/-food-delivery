@@ -1,6 +1,7 @@
 package com.fooddelivery.menu;
 
 import com.fooddelivery.common.error.NotFoundException;
+import com.fooddelivery.outbox.OutboxWriter;
 import com.fooddelivery.restaurant.Restaurant;
 import com.fooddelivery.restaurant.RestaurantOwnerService;
 import org.springframework.stereotype.Service;
@@ -14,10 +15,13 @@ public class MenuOwnerService {
 
     private final MenuItemRepository menuItemRepository;
     private final RestaurantOwnerService restaurantOwnerService;
+    private final OutboxWriter outboxWriter;
 
-    public MenuOwnerService(MenuItemRepository menuItemRepository, RestaurantOwnerService restaurantOwnerService) {
+    public MenuOwnerService(MenuItemRepository menuItemRepository, RestaurantOwnerService restaurantOwnerService,
+                            OutboxWriter outboxWriter) {
         this.menuItemRepository = menuItemRepository;
         this.restaurantOwnerService = restaurantOwnerService;
+        this.outboxWriter = outboxWriter;
     }
 
     @Transactional(readOnly = true)
@@ -30,6 +34,7 @@ public class MenuOwnerService {
     @Transactional
     public MenuItemOwnerResponse create(Long restaurantId, Long ownerId, MenuItemRequest request) {
         Restaurant restaurant = restaurantOwnerService.requireOwned(restaurantId, ownerId);
+        outboxWriter.restaurantChanged(restaurantId);
         MenuItem item = new MenuItem();
         item.setRestaurant(restaurant);
         item.setName(request.name());
@@ -46,6 +51,9 @@ public class MenuOwnerService {
     @Transactional
     public MenuItemOwnerResponse update(Long restaurantId, Long itemId, Long ownerId, MenuItemUpdateRequest request) {
         MenuItem item = requireOwnedItem(restaurantId, itemId, ownerId);
+        // Bump BEFORE touching the item: X-lock the restaurant row first, so this can't form a lock cycle
+        // with order placement (orders FK S-locks the restaurant, then the stock UPDATE X-locks the item).
+        outboxWriter.restaurantChanged(restaurantId);
         if (request.name() != null) {
             item.setName(request.name());
         }
@@ -72,7 +80,7 @@ public class MenuOwnerService {
      * if an order decremented stock (which bumps version) in between, this fails with 409 instead of
      * silently overwriting the sale.
      */
-    @Transactional
+    @Transactional // no outbox event: stock is deliberately not indexed (changes on every order)
     public MenuItemOwnerResponse setStock(Long restaurantId, Long itemId, Long ownerId, Integer stock) {
         MenuItem item = requireOwnedItem(restaurantId, itemId, ownerId);
         item.setStock(stock);
@@ -82,7 +90,9 @@ public class MenuOwnerService {
     /** Soft delete: past order_items still reference the row. */
     @Transactional
     public void delete(Long restaurantId, Long itemId, Long ownerId) {
-        requireOwnedItem(restaurantId, itemId, ownerId).setActive(false);
+        MenuItem item = requireOwnedItem(restaurantId, itemId, ownerId);
+        outboxWriter.restaurantChanged(restaurantId);
+        item.setActive(false);
     }
 
     private MenuItem requireOwnedItem(Long restaurantId, Long itemId, Long ownerId) {

@@ -4,6 +4,7 @@ import com.fooddelivery.city.City;
 import com.fooddelivery.city.CityService;
 import com.fooddelivery.common.error.BadRequestException;
 import com.fooddelivery.common.error.ErrorCode;
+import com.fooddelivery.outbox.OutboxWriter;
 import com.fooddelivery.user.Role;
 import com.fooddelivery.user.User;
 import com.fooddelivery.user.UserRepository;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 
@@ -35,6 +37,8 @@ class RestaurantAdminServiceTest {
     UserService userService;
     @Mock
     CityService cityService;
+    @Mock
+    OutboxWriter outboxWriter;
     @InjectMocks
     RestaurantAdminService service;
 
@@ -73,9 +77,15 @@ class RestaurantAdminServiceTest {
         city.setName("Pune");
         when(userRepository.findById(1L)).thenReturn(Optional.of(user(Role.RESTAURANT_OWNER, true)));
         when(cityService.requireActive(10L)).thenReturn(city);
-        when(restaurantRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(restaurantRepository.save(any())).thenAnswer(inv -> {
+            Restaurant saved = inv.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", 99L); // what the database would assign
+            return saved;
+        });
 
         RestaurantResponse response = service.create(request);
+
+        verify(outboxWriter).restaurantChanged(99L); // new restaurant is queued for the search index
 
         assertThat(response.open()).isFalse();
         assertThat(response.active()).isTrue();

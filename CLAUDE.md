@@ -35,6 +35,10 @@ explain every line in an interview, so the workflow is deliberately slow.
   stock UPDATE before inserting order_items (ADR 0008); markBusy on the partner before setting
   orders.delivery_partner_id (ADR 0010); rating increments before inserting the review (ADR 0012).
   Always prove lock ordering with a real concurrency test.
+- Search index sync: follow the `search-sync` skill. Every write path that changes indexed data calls
+  `OutboxWriter` inside its transaction and before modifying entities; never write to the index directly.
+- Queue-style tables claimed with `FOR UPDATE SKIP LOCKED` are processed under READ COMMITTED (gap locks
+  under REPEATABLE READ deadlock parallel consumers — ADR 0013).
 - Retry (`@Retryable` on PessimisticLockingFailureException) wraps the transaction from outside and is only
   a safety net, never the fix for a systematic deadlock.
 - "First writer wins" claims (partner assignment) use conditional UPDATE; losers get 409.

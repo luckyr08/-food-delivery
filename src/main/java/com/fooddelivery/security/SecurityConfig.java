@@ -39,7 +39,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers(PUBLIC_DOCS).permitAll()
                         // Browsing is public, like real food apps; ordering requires login.
-                        .requestMatchers(HttpMethod.GET, "/api/cities/**", "/api/restaurants/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/cities/**", "/api/restaurants/**", "/api/search/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/owner/**").hasRole("RESTAURANT_OWNER")

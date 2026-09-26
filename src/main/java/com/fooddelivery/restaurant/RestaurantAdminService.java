@@ -5,6 +5,7 @@ import com.fooddelivery.common.error.BadRequestException;
 import com.fooddelivery.common.error.ErrorCode;
 import com.fooddelivery.common.error.NotFoundException;
 import com.fooddelivery.common.web.PageResponse;
+import com.fooddelivery.outbox.OutboxWriter;
 import com.fooddelivery.user.NewUserRequest;
 import com.fooddelivery.user.Role;
 import com.fooddelivery.user.User;
@@ -23,13 +24,15 @@ public class RestaurantAdminService {
     private final UserRepository userRepository;
     private final UserService userService;
     private final CityService cityService;
+    private final OutboxWriter outboxWriter;
 
     public RestaurantAdminService(RestaurantRepository restaurantRepository, UserRepository userRepository,
-                                  UserService userService, CityService cityService) {
+                                  UserService userService, CityService cityService, OutboxWriter outboxWriter) {
         this.restaurantRepository = restaurantRepository;
         this.userRepository = userRepository;
         this.userService = userService;
         this.cityService = cityService;
+        this.outboxWriter = outboxWriter;
     }
 
     /** Step 1 of onboarding: the owner account. One owner can later get several restaurants. */
@@ -54,13 +57,16 @@ public class RestaurantAdminService {
         restaurant.setAddress(request.address());
         restaurant.setCuisine(request.cuisine());
         restaurant.setOpen(false);
-        return RestaurantResponse.from(restaurantRepository.save(restaurant));
+        Restaurant saved = restaurantRepository.save(restaurant);
+        outboxWriter.restaurantChanged(saved.getId());
+        return RestaurantResponse.from(saved);
     }
 
     @Transactional
     public RestaurantResponse update(Long id, UpdateRestaurantRequest request) {
         Restaurant restaurant = restaurantRepository.findWithOwnerAndCityById(id)
                 .orElseThrow(() -> new NotFoundException("Restaurant", id));
+        outboxWriter.restaurantChanged(id); // before modifying the entity (lock order, ADR 0013)
         if (request.name() != null) {
             restaurant.setName(request.name());
         }

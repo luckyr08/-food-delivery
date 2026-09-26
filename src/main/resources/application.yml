@@ -37,6 +37,12 @@ app:
   review:
     # Customers can review an order for this many days after delivery.
     window-days: 7
+  outbox:
+    relay:
+      # Background relay that pushes outbox events to the search index.
+      enabled: true
+      poll-interval-ms: 1000
+      batch-size: 100
 
 server:
   error:

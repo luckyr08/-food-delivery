@@ -3,6 +3,7 @@ package com.fooddelivery.restaurant;
 import com.fooddelivery.common.error.ConflictException;
 import com.fooddelivery.common.error.ErrorCode;
 import com.fooddelivery.common.error.NotFoundException;
+import com.fooddelivery.outbox.OutboxWriter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,9 +13,11 @@ import java.util.List;
 public class RestaurantOwnerService {
 
     private final RestaurantRepository restaurantRepository;
+    private final OutboxWriter outboxWriter;
 
-    public RestaurantOwnerService(RestaurantRepository restaurantRepository) {
+    public RestaurantOwnerService(RestaurantRepository restaurantRepository, OutboxWriter outboxWriter) {
         this.restaurantRepository = restaurantRepository;
+        this.outboxWriter = outboxWriter;
     }
 
     @Transactional(readOnly = true)
@@ -30,6 +33,7 @@ public class RestaurantOwnerService {
             throw new ConflictException(ErrorCode.RESTAURANT_INACTIVE,
                     "Restaurant " + restaurantId + " is deactivated and cannot be opened");
         }
+        outboxWriter.restaurantChanged(restaurantId);
         restaurant.setOpen(open);
         return RestaurantResponse.from(restaurant);
     }

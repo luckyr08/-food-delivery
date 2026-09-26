@@ -10,6 +10,7 @@ import com.fooddelivery.order.Order;
 import com.fooddelivery.order.OrderRepository;
 import com.fooddelivery.order.OrderStatus;
 import com.fooddelivery.order.OrderStatusHistoryRepository;
+import com.fooddelivery.outbox.OutboxWriter;
 import com.fooddelivery.restaurant.RestaurantBrowseService;
 import com.fooddelivery.restaurant.RestaurantRepository;
 import com.fooddelivery.user.UserRepository;
@@ -35,11 +36,13 @@ public class ReviewService {
     private final UserRepository userRepository;
     private final ReviewProperties properties;
     private final Clock clock;
+    private final OutboxWriter outboxWriter;
 
     public ReviewService(ReviewRepository reviewRepository, OrderRepository orderRepository,
                          OrderStatusHistoryRepository historyRepository, RestaurantRepository restaurantRepository,
                          DeliveryPartnerRepository partnerRepository, RestaurantBrowseService restaurantBrowseService,
-                         UserRepository userRepository, ReviewProperties properties, Clock clock) {
+                         UserRepository userRepository, ReviewProperties properties, Clock clock,
+                         OutboxWriter outboxWriter) {
         this.reviewRepository = reviewRepository;
         this.orderRepository = orderRepository;
         this.historyRepository = historyRepository;
@@ -49,6 +52,7 @@ public class ReviewService {
         this.userRepository = userRepository;
         this.properties = properties;
         this.clock = clock;
+        this.outboxWriter = outboxWriter;
     }
 
     /**
@@ -72,6 +76,7 @@ public class ReviewService {
 
         // Aggregates FIRST: the review's FK to restaurants would take a shared lock on the restaurant row,
         // and concurrent reviews upgrading S -> X would deadlock (same rule as ADR 0008 / 0010).
+        outboxWriter.restaurantChanged(order.getRestaurant().getId()); // rating is shown in search
         restaurantRepository.addRating(order.getRestaurant().getId(), request.restaurantRating());
         if (request.partnerRating() != null) {
             partnerRepository.addRating(order.getDeliveryPartner().getId(), request.partnerRating());

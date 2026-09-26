@@ -1,5 +1,7 @@
 package com.fooddelivery.support;
 
+import com.fooddelivery.outbox.OutboxRelay;
+import com.fooddelivery.search.InMemorySearchIndex;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,9 +50,16 @@ public abstract class IntegrationTestBase {
         AsyncTestSupport.awaitIdle(notificationExecutor);
     }
 
+    @Autowired
+    protected InMemorySearchIndex searchIndex;
+
+    @Autowired
+    protected OutboxRelay outboxRelay;
+
     @BeforeEach
     void cleanDatabase() {
         DatabaseCleaner.clean(jdbc);
+        searchIndex.reset(); // the in-memory "Elasticsearch" is part of the state under test
     }
 
     // ---- auth helpers ----
