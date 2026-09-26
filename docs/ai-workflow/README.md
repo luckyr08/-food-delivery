@@ -34,7 +34,8 @@ concurrency lessons into reusable **project skills** (commit `b5ca421`) and used
 | `concurrency-proof` | latch-based race-test harness, invariants to assert, CAS vs optimistic vs atomic increment, lock-order rules from three real deadlocks, "prove it by reversing the order" | concurrency work after step 10 |
 | `api-endpoint` | URL/role conventions, ownership query → 404 (IDOR), DTO records, ErrorCode, pagination limits, test checklist | new endpoints |
 | `adr-writer` | ADR template with verification evidence | new ADRs |
-| `flyway-migration` | never edit applied migrations, MySQL DDL caveats, `ddl-auto=validate` check | schema changes |
+| `flyway-migration` | never edit applied migrations, MySQL DDL caveats, `ddl-auto=validate` check | schema changes (V4, V5) |
+| `search-sync` | what to index, outbox calls in every write path, versioning, outage/convergence tests, reindex runbook | Created for step 12 (search), then followed while building it |
 
 Next: run Claude Code's built-in `/security-review` and `/code-review` skills on the finished code and
 commit any fixes separately (this line is updated once done).
@@ -55,6 +56,8 @@ Keeping this list honest was part of the process; each item is visible in the hi
 | Used Java 21 pattern-matching `switch` on Java 17 | Compiler | `instanceof` chain |
 | Controller calling a repository directly (broke our own layering rule) | Self-review against `CLAUDE.md` | `MenuBrowseService` |
 | Skipped the README update in step 2 | Me | Rule added to `CLAUDE.md`: every step updates README |
+| Proposed the outbox id as the search document version (ids aren't commit-ordered → lost updates) | Writing the `search-sync` skill | Per-restaurant `search_version` bumped in the same transaction |
+| Outbox relay under REPEATABLE READ deadlocked with parallel relays; DB errors misread as index failures | `SearchSyncConcurrencyTest` | READ COMMITTED relay; narrower catch |
 | Test-only issues: invalid assertion, a Python edit script broken by Java text blocks, bash brace expansion in a curl smoke script | Compiler / test output | Fixed before commit |
 
 ## What I'd tell another engineer

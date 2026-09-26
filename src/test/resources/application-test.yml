@@ -5,3 +5,9 @@ spring:
   flyway:
     # Tests reset the schema between classes; never enable this outside tests.
     clean-disabled: false
+
+app:
+  outbox:
+    relay:
+      # Tests drive the relay explicitly (OutboxRelay.drain()) for deterministic assertions.
+      enabled: false

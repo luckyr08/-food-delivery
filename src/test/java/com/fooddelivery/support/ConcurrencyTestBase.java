@@ -1,5 +1,7 @@
 package com.fooddelivery.support;
 
+import com.fooddelivery.outbox.OutboxRelay;
+import com.fooddelivery.search.InMemorySearchIndex;
 import com.fooddelivery.security.AuthUser;
 import com.fooddelivery.security.JwtService;
 import com.fooddelivery.user.Role;
@@ -46,6 +48,10 @@ public abstract class ConcurrencyTestBase {
     protected JdbcTemplate jdbc;
     @Autowired
     protected JwtService jwtService;
+    @Autowired
+    protected InMemorySearchIndex searchIndex;
+    @Autowired
+    protected OutboxRelay outboxRelay;
 
     protected final HttpClient http = HttpClient.newHttpClient();
     protected Long cityId;
@@ -64,6 +70,7 @@ public abstract class ConcurrencyTestBase {
     @BeforeEach
     void setUpBaseData() {
         DatabaseCleaner.clean(jdbc);
+        searchIndex.reset();
         Long ownerId = insertUser("owner@example.com", "RESTAURANT_OWNER");
         ownerToken = token(ownerId, Role.RESTAURANT_OWNER);
         cityId = insert("INSERT INTO cities (name, active, created_at, updated_at) "

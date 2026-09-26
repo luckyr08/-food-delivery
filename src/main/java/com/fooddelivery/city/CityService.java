@@ -4,6 +4,7 @@ import com.fooddelivery.common.error.BadRequestException;
 import com.fooddelivery.common.error.ConflictException;
 import com.fooddelivery.common.error.ErrorCode;
 import com.fooddelivery.common.error.NotFoundException;
+import com.fooddelivery.outbox.OutboxWriter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,9 +14,11 @@ import java.util.List;
 public class CityService {
 
     private final CityRepository cityRepository;
+    private final OutboxWriter outboxWriter;
 
-    public CityService(CityRepository cityRepository) {
+    public CityService(CityRepository cityRepository, OutboxWriter outboxWriter) {
         this.cityRepository = cityRepository;
+        this.outboxWriter = outboxWriter;
     }
 
     @Transactional
@@ -32,6 +35,11 @@ public class CityService {
     @Transactional
     public CityResponse update(Long id, CityUpdateRequest request) {
         City city = require(id);
+        boolean nameChanges = request.name() != null && !request.name().equals(city.getName());
+        boolean activeChanges = request.active() != null && request.active() != city.isActive();
+        if (nameChanges || activeChanges) {
+            outboxWriter.cityChanged(id); // restaurant documents embed the city name and visibility
+        }
         if (request.name() != null && !request.name().equals(city.getName())) {
             if (cityRepository.existsByNameAndIdNot(request.name(), id)) {
                 throw duplicate(request.name());

@@ -53,6 +53,13 @@ public class Restaurant extends AuditedEntity {
     @Column(name = "rating_count", nullable = false)
     private int ratingCount;
 
+    /**
+     * Search document version, bumped only by OutboxWriter (native UPDATE). Never written by entity
+     * saves, so a stale entity can't overwrite a newer value.
+     */
+    @Column(name = "search_version", insertable = false, updatable = false)
+    private long searchVersion;
+
     @Version
     private long version;
 }

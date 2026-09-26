@@ -24,6 +24,7 @@ notifications** delivered only after commit; and **ratings & reviews**.
 - [Concurrency & consistency](#concurrency--consistency)
 - [Notifications (asynchronous fan-out)](#notifications-asynchronous-fan-out)
 - [Ratings & reviews](#ratings--reviews)
+- [Search (Elasticsearch port, outbox sync)](#search-elasticsearch-port-outbox-sync)
 - [Error handling](#error-handling)
 - [API overview](#api-overview)
 - [Testing](#testing)
@@ -199,6 +200,25 @@ in the same transaction as the review, so concurrent reviews are never lost and 
 counts. Public reviews show only the reviewer's first name; partner ratings stay private
 ([ADR 0012](docs/decisions/0012-ratings-and-reviews.md)).
 
+## Search (Elasticsearch port, outbox sync)
+Typo-tolerant search over restaurant names, cuisine **and dishes** (`/api/search/restaurants?cityId=1&q=biryni`),
+with the dishes that matched, plus autocomplete (`/api/search/suggest`).
+
+- **Index:** behind a `SearchIndex` port shaped after Elasticsearch. The app runs a **simulated
+  Elasticsearch** (in-memory adapter with ES semantics: external versioning, fuzzy matching, nested dish
+  hits, scoring, alias-swap rebuild). The real index mapping is in
+  `src/main/resources/search/restaurants-mapping.json`; no Elasticsearch install is needed.
+- **One document per restaurant with its menu nested**; stock is deliberately not indexed.
+- **No lost updates:** every change to indexed data writes an `outbox_event` row and bumps
+  `restaurants.search_version` in the same transaction. A relay (every 1 s, `FOR UPDATE SKIP LOCKED`,
+  READ COMMITTED) re-reads the current state and upserts it with `version = search_version`, so retries,
+  duplicates and out-of-order processing are harmless. Index down → events retry with backoff and search
+  falls back to MySQL.
+- **Operations:** `GET /api/admin/search/status` (backlog, retries, rejected stale writes),
+  `POST /api/admin/search/reindex`, and `PUT /api/admin/search/simulated-availability` to demo an outage.
+
+Details and test evidence: [ADR 0013](docs/decisions/0013-search-index-and-outbox.md).
+
 ## Error handling
 Every error is an [RFC 9457 Problem Details](https://www.rfc-editor.org/rfc/rfc9457) response
 (`application/problem+json`) with a stable machine-readable `code`:
@@ -273,6 +293,11 @@ Details: [ADR 0004](docs/decisions/0004-error-handling.md).
 | POST | `/api/orders/{id}/review` | Customer | Rate a delivered order: `restaurantRating` 1–5, optional `partnerRating`, `comment` |
 | GET | `/api/orders/{id}/review` | Customer | My review of an order |
 | GET | `/api/restaurants/{id}/reviews?page=&size=` | Public | Restaurant reviews, newest first (first name only) |
+| GET | `/api/search/restaurants?cityId=&q=&cuisine=&vegOnly=&openOnly=&page=&size=` | Public | Typo-tolerant search incl. dishes |
+| GET | `/api/search/suggest?cityId=&q=` | Public | Autocomplete |
+| POST | `/api/admin/search/reindex` | Admin | Rebuild the index from MySQL |
+| GET | `/api/admin/search/status` | Admin | Index and outbox health |
+| PUT | `/api/admin/search/simulated-availability` | Admin | Simulate search outage (`{"available":false}`) |
 | GET | `/api/notifications?unreadOnly=&page=&size=` | Authenticated | My notifications, newest first |
 | PATCH | `/api/notifications/{id}/read` | Authenticated | Mark one as read |
 | POST | `/api/notifications/read-all` | Authenticated | Mark all as read |
@@ -355,9 +380,9 @@ What I'd change for real production load, roughly in order:
 
 | Area | Now | Production |
 |---|---|---|
-| Notifications | In-memory after-commit events (best effort) | Transactional outbox + relay (`FOR UPDATE SKIP LOCKED`), or outbox → Kafka ([ADR 0011](docs/decisions/0011-async-notifications.md)) |
+| Notifications | In-memory after-commit events (best effort) | Move onto the outbox already built for search ([ADR 0013](docs/decisions/0013-search-index-and-outbox.md)), or outbox → Kafka |
 | Payment | Charged inside the placement transaction (mock gateway) + refund on rollback | Saga: `PENDING_PAYMENT` → gateway → confirm / compensate; webhook reconciliation ([ADR 0008](docs/decisions/0008-order-placement.md)) |
-| Browsing / menus | Direct DB reads | Cache (Redis) with eviction on owner edits; read replicas; search via FULLTEXT/Elasticsearch |
+| Browsing / menus | Direct DB reads; search via an ES-shaped port with an in-memory adapter, synced by an outbox | Real Elasticsearch adapter behind the same port; CDC (Debezium) instead of the outbox at larger scale; Redis cache for menus |
 | Orders table | Single table | Partition/archive by date; move history to cheaper storage |
 | Hot items (flash sales) | Row-lock serialisation on the item | Pre-sharded stock counters or Redis reservations reconciled to the DB |
 | Assignment | Partners claim within their city | Geo-based dispatch (nearest partner, offer + timeout), ETA |
