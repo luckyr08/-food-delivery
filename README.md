@@ -32,7 +32,7 @@ notifications** delivered only after commit; and **ratings & reviews**.
 - [Testing](#testing)
 - [Assumptions](#assumptions)
 - [Scaling to production](#scaling-to-production)
-- [Design decisions](#design-decisions)
+- [Design decisions](#design-decisions) (incl. HLD / LLD diagrams)
 - [AI workflow](#ai-workflow)
 
 ## Quick start
@@ -402,6 +402,10 @@ What I'd change for real production load, roughly in order:
 | Deployment | Single instance | Stateless app behind a load balancer; all concurrency control is in the DB, so it scales horizontally unchanged |
 
 ## Design decisions
+Design documents with diagrams: [High-Level Design](docs/design/HLD.md) (context, architecture, flows,
+lifecycle, deployment) and [Low-Level Design](docs/design/LLD.md) (ER model, class diagrams, state
+machines, concurrency catalogue, transactions).
+
 Every decision with the alternatives considered, trade-offs and verification evidence:
 
 - [0001 — stack and database](docs/decisions/0001-stack-and-database.md)
