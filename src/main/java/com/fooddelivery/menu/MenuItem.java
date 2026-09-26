@@ -48,6 +48,10 @@ public class MenuItem extends AuditedEntity {
     /** Remaining units; null = unlimited. Decremented only via conditional UPDATE. */
     private Integer stock;
 
+    /** Hot item: gated in Redis before MySQL when app.stock-gate.mode=redis (MySQL still decides). */
+    @Column(name = "flash_sale", nullable = false)
+    private boolean flashSale;
+
     @Column(nullable = false)
     private boolean active = true;
 

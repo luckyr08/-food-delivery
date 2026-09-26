@@ -4,8 +4,12 @@ import com.fooddelivery.payment.ChargeRequest;
 import com.fooddelivery.payment.ChargeResult;
 import com.fooddelivery.payment.PaymentDeclinedException;
 import com.fooddelivery.payment.PaymentGateway;
+import com.fooddelivery.stockgate.GateReservation;
+import com.fooddelivery.stockgate.StockGateService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import java.util.stream.Collectors;
 
 /**
  * Order placement as a saga. Deliberately NOT @Transactional:
@@ -22,15 +26,33 @@ public class OrderCheckoutService {
     private final OrderService orderService;
     private final OrderLifecycleService lifecycle;
     private final PaymentGateway gateway;
+    private final StockGateService stockGate;
 
-    public OrderCheckoutService(OrderService orderService, OrderLifecycleService lifecycle, PaymentGateway gateway) {
+    public OrderCheckoutService(OrderService orderService, OrderLifecycleService lifecycle, PaymentGateway gateway,
+                                StockGateService stockGate) {
         this.orderService = orderService;
         this.lifecycle = lifecycle;
         this.gateway = gateway;
+        this.stockGate = stockGate;
     }
 
     public PlacementResult checkout(Long customerId, PlaceOrderRequest request, String idempotencyKey) {
-        PlacementResult reserved = orderService.placeOrder(customerId, request, idempotencyKey); // step 1
+        // Step 0 (app.stock-gate.mode=redis, hot items only): losers of a flash sale are rejected here in ~1 ms
+        // and never reach MySQL. MySQL's conditional UPDATE in step 1 still decides.
+        GateReservation gate = stockGate.admit(customerId, request.items().stream().collect(
+                Collectors.toMap(OrderLineRequest::menuItemId, OrderLineRequest::quantity, Integer::sum)));
+        PlacementResult reserved;
+        try {
+            reserved = orderService.placeOrder(customerId, request, idempotencyKey); // step 1
+        } catch (RuntimeException e) {
+            stockGate.release(gate); // MySQL said no (or failed): the gate gives the units back
+            throw e;
+        }
+        if (reserved.replayed()) {
+            stockGate.release(gate); // nothing new was bought
+        } else {
+            stockGate.confirm(gate); // committed: MySQL's deduction is now the reservation
+        }
         OrderResponse order = reserved.order();
         if (reserved.replayed() || order.status() != OrderStatus.PAYMENT_PENDING) {
             return reserved; // replay, or cash on delivery (already PLACED)

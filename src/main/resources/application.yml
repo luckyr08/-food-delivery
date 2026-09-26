@@ -60,6 +60,13 @@ app:
       enabled: true
       interval-ms: 60000
       min-age-seconds: 60
+  stock-gate:
+    # mysql-only (default): MySQL's conditional UPDATE does everything.
+    # redis: flash-sale items are admitted through a Redis gate first (losers rejected in ~1 ms);
+    #        MySQL remains the source of truth and the final guard. Adapter: simulated Redis (see ADR 0016).
+    mode: mysql-only
+    reservation-ttl-seconds: 30
+    max-units-per-user: 2
   outbox:
     relay:
       # Background relay that pushes outbox events to the search index.

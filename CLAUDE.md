@@ -37,6 +37,8 @@ explain every line in an interview, so the workflow is deliberately slow.
   Always prove lock ordering with a real concurrency test.
 - Never call an external system (payment gateway, push provider) inside a DB transaction: reserve/record in a
   short transaction, call outside, then confirm or compensate; retries via the outbox (ADR 0015).
+- Redis (stock gate) is an admission filter only; MySQL's conditional UPDATE stays the final guard in every mode.
+  Anything that returns stock to MySQL must also re-sync the gate (StockGateService.afterMysqlRestock).
 - Search index sync: follow the `search-sync` skill. Every write path that changes indexed data calls
   `OutboxWriter` inside its transaction and before modifying entities; never write to the index directly.
 - Queue-style tables claimed with `FOR UPDATE SKIP LOCKED` are processed under READ COMMITTED (gap locks

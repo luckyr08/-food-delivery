@@ -169,6 +169,10 @@ PLACED ──► ACCEPTED ──► PREPARING ──► READY_FOR_PICKUP ──�
   `order_items` (whose FK would otherwise take a shared lock first — a deadlock our concurrency test found).
   Deadlocks/lock timeouts are still retried from outside the transaction as a safety net.
 - **Idempotent placement** with an optional `Idempotency-Key`, safe under concurrent duplicates.
+- **Hot items (optional Redis gate):** with `app.stock-gate.mode=redis`, items marked `flashSale` are admitted
+  through a Redis gate first (per-customer lock and cap, atomic Lua); flash-sale losers get `409 SOLD_OUT` in
+  ~1 ms without touching MySQL. Default `mysql-only`. MySQL stays the source of truth in both modes
+  ([ADR 0016](docs/decisions/0016-redis-stock-gate.md)).
 - **Partner contention:** claims use two compare-and-set UPDATEs (partner `AVAILABLE → BUSY`, then order
   `delivery_partner_id IS NULL → partner`) in one transaction, so exactly one partner gets an order and a
   partner never holds two ([ADR 0010](docs/decisions/0010-delivery-assignment.md)).
@@ -290,7 +294,7 @@ Details: [ADR 0004](docs/decisions/0004-error-handling.md).
 | GET | `/api/owner/restaurants` | Owner | My restaurants |
 | PATCH | `/api/owner/restaurants/{id}/status` | Owner | Open / close (`{"open":true}`) |
 | GET | `/api/owner/restaurants/{id}/menu-items` | Owner | My menu incl. unavailable items, with stock |
-| POST | `/api/owner/restaurants/{id}/menu-items` | Owner | Add item (`stock` omitted/null = unlimited) |
+| POST | `/api/owner/restaurants/{id}/menu-items` | Owner | Add item (`stock` omitted/null = unlimited; `flashSale` marks a hot item) |
 | PATCH | `/api/owner/restaurants/{id}/menu-items/{itemId}` | Owner | Update name, description, category, price, veg, available |
 | PUT | `/api/owner/restaurants/{id}/menu-items/{itemId}/stock` | Owner | Set stock (`{"stock":25}` or `{"stock":null}` = unlimited) |
 | DELETE | `/api/owner/restaurants/{id}/menu-items/{itemId}` | Owner | Remove item (soft delete) |
@@ -414,7 +418,7 @@ What I'd change for real production load, roughly in order:
 | Payment | Saga: reserve → charge outside transactions → confirm / compensate; signed webhooks; reconciler; refunds via outbox ([ADR 0015](docs/decisions/0015-payment-saga.md)) | Real gateway adapter (Razorpay/Stripe) behind the same interface; secret rotation |
 | Browsing / menus | Direct DB reads; search via an ES-shaped port with an in-memory adapter, synced by an outbox | Real Elasticsearch adapter behind the same port; CDC (Debezium) instead of the outbox at larger scale; Redis cache for menus |
 | Orders table | Single table | Partition/archive by date; move history to cheaper storage |
-| Hot items (flash sales) | Row-lock serialisation, protected by the bulkhead | Redis stock gate before MySQL, or stock split into bucket rows |
+| Hot items (flash sales) | Optional stock gate (`app.stock-gate.mode=redis`, simulated Redis adapter + real Lua scripts) | Real Redis adapter (Lettuce) running the same scripts |
 | Write spikes | Bulkhead + rate limit shed excess load | Async intake (Kafka, `202 Accepted`), shard orders by city, ProxySQL |
 | Assignment | Partners claim within their city | Geo-based dispatch (nearest partner, offer + timeout), ETA |
 | Auth | 60-min access tokens, no revocation | Refresh tokens, revocation list / token version, rate limiting and lockout |

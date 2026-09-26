@@ -15,6 +15,7 @@ public class OutboxWriter {
 
     public static final String RESTAURANT = "RESTAURANT";
     public static final String PAYMENT = "PAYMENT";
+    public static final String STOCK_GATE = "STOCK_GATE";
     static final String RESTAURANT_CHANGED = "RESTAURANT_CHANGED";
 
     private final JdbcTemplate jdbc;
@@ -36,6 +37,12 @@ public class OutboxWriter {
     @Transactional(propagation = Propagation.MANDATORY)
     public void paymentRefundRequested(long paymentId) {
         outbox.append(PAYMENT, paymentId, "REFUND_REQUESTED");
+    }
+
+    /** MySQL stock of a hot item went back up (cancel/decline): re-sync the Redis counter after commit. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void stockGateResync(long menuItemId) {
+        outbox.append(STOCK_GATE, menuItemId, "RESYNC");
     }
 
     /** A city's name or visibility changed: every restaurant document in it must be refreshed. */

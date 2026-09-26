@@ -74,6 +74,8 @@ public class DemoDataSeeder implements ApplicationRunner {
         Long spiceHub = openRestaurant(ravi, pune, "Spice Hub", "12 MG Road, Pune", "North Indian");
         item(spiceHub, ravi, "Paneer Tikka", "Starters", "249.00", true, null);
         item(spiceHub, ravi, "Chicken Biryani", "Mains", "329.00", false, 5); // limited: try to oversell it
+        menuOwnerService.create(spiceHub, ravi, new MenuItemRequest("Festival Thali", null, "Specials",
+                new BigDecimal("499.00"), true, true, 20, true)); // flash-sale item (Redis gate when enabled)
         item(spiceHub, ravi, "Dal Makhani", "Mains", "219.00", true, null);
         item(spiceHub, ravi, "Butter Naan", "Breads", "49.00", true, 50);
 
@@ -109,7 +111,7 @@ public class DemoDataSeeder implements ApplicationRunner {
     private void item(Long restaurantId, Long ownerId, String name, String category, String price, boolean veg,
                       Integer stock) {
         menuOwnerService.create(restaurantId, ownerId,
-                new MenuItemRequest(name, null, category, new BigDecimal(price), veg, true, stock));
+                new MenuItemRequest(name, null, category, new BigDecimal(price), veg, true, stock, false));
     }
 
     private void partner(String name, String email, Long cityId, VehicleType vehicle) {

@@ -44,6 +44,7 @@ public class MenuOwnerService {
         item.setVeg(request.veg() == null || request.veg());
         item.setAvailable(request.available() == null || request.available());
         item.setStock(request.stock());
+        item.setFlashSale(Boolean.TRUE.equals(request.flashSale()));
         return MenuItemOwnerResponse.from(menuItemRepository.save(item));
     }
 
@@ -71,6 +72,9 @@ public class MenuOwnerService {
         }
         if (request.available() != null) {
             item.setAvailable(request.available());
+        }
+        if (request.flashSale() != null) {
+            item.setFlashSale(request.flashSale());
         }
         return MenuItemOwnerResponse.from(item);
     }

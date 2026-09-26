@@ -14,7 +14,8 @@ public record MenuItemUpdateRequest(
         @Size(max = 100) String category,
         @DecimalMin("0.01") @Digits(integer = 8, fraction = 2) BigDecimal price,
         Boolean veg,
-        Boolean available) {
+        Boolean available,
+        Boolean flashSale) {
 
     public MenuItemUpdateRequest {
         name = name == null ? null : name.trim();

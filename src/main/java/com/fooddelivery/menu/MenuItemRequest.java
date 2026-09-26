@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
 
-/** Create a menu item. stock null = unlimited; veg/available default to true. */
+/** Create a menu item. stock null = unlimited; veg/available default to true; flashSale defaults to false. */
 public record MenuItemRequest(
         @NotBlank @Size(max = 150) String name,
         @Size(max = 500) String description,
@@ -18,7 +18,8 @@ public record MenuItemRequest(
         @NotNull @DecimalMin("0.01") @Digits(integer = 8, fraction = 2) BigDecimal price,
         Boolean veg,
         Boolean available,
-        @PositiveOrZero Integer stock) {
+        @PositiveOrZero Integer stock,
+        Boolean flashSale) {
 
     public MenuItemRequest {
         name = name == null ? null : name.trim();

@@ -9,6 +9,7 @@ import com.fooddelivery.menu.MenuItemRepository;
 import com.fooddelivery.payment.PaymentRepository;
 import com.fooddelivery.payment.PaymentService;
 import com.fooddelivery.restaurant.RestaurantOwnerService;
+import com.fooddelivery.stockgate.StockGateService;
 import com.fooddelivery.user.Role;
 import com.fooddelivery.user.UserRepository;
 import org.springframework.context.ApplicationEventPublisher;
@@ -35,12 +36,13 @@ public class OrderLifecycleService {
     private final UserRepository userRepository;
     private final DeliveryPartnerRepository partnerRepository;
     private final ApplicationEventPublisher events;
+    private final StockGateService stockGate;
 
     public OrderLifecycleService(OrderRepository orderRepository, OrderStatusHistoryRepository historyRepository,
                                  MenuItemRepository menuItemRepository, PaymentRepository paymentRepository,
                                  PaymentService paymentService, RestaurantOwnerService restaurantOwnerService,
                                  UserRepository userRepository, DeliveryPartnerRepository partnerRepository,
-                                 ApplicationEventPublisher events) {
+                                 ApplicationEventPublisher events, StockGateService stockGate) {
         this.orderRepository = orderRepository;
         this.historyRepository = historyRepository;
         this.menuItemRepository = menuItemRepository;
@@ -50,6 +52,7 @@ public class OrderLifecycleService {
         this.userRepository = userRepository;
         this.partnerRepository = partnerRepository;
         this.events = events;
+        this.stockGate = stockGate;
     }
 
     // ---- entry points per role ----
@@ -168,7 +171,10 @@ public class OrderLifecycleService {
     private void restock(Order order) {
         order.getItems().stream()
                 .sorted(Comparator.comparing(item -> item.getMenuItem().getId()))
-                .forEach(item -> menuItemRepository.restock(item.getMenuItem().getId(), item.getQuantity()));
+                .forEach(item -> {
+                    menuItemRepository.restock(item.getMenuItem().getId(), item.getQuantity());
+                    stockGate.afterMysqlRestock(item.getMenuItem()); // Redis counter re-synced after commit
+                });
     }
 
     private static void requireReason(String reason, String message) {

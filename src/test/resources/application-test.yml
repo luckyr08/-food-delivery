@@ -2,6 +2,11 @@ spring:
   datasource:
     # Separate schema so tests never touch dev data.
     url: ${TEST_DB_URL:jdbc:mysql://localhost:3306/food_delivery_test}
+    hikari:
+      # Many cached test contexts (property overrides, @MockitoBean) each keep a pool; hold few idle connections
+      # so they don't exhaust MySQL's max_connections (151). Pools still grow to 20 under concurrency tests.
+      minimum-idle: 2
+      idle-timeout: 10000
   flyway:
     # Tests reset the schema between classes; never enable this outside tests.
     clean-disabled: false
