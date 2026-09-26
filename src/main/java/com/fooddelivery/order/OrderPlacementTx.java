@@ -8,6 +8,7 @@ import com.fooddelivery.menu.MenuItem;
 import com.fooddelivery.menu.MenuItemRepository;
 import com.fooddelivery.payment.Payment;
 import com.fooddelivery.payment.PaymentRepository;
+import com.fooddelivery.payment.PaymentMethod;
 import com.fooddelivery.payment.PaymentService;
 import com.fooddelivery.restaurant.Restaurant;
 import com.fooddelivery.restaurant.RestaurantBrowseService;
@@ -25,7 +26,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * The single transaction that places an order: stock, order and payment commit together or not at all.
+ * Saga step 1: one short transaction that reserves stock, records the order (PAYMENT_PENDING, or PLACED for
+ * cash on delivery) and the payment — all or nothing. The gateway is charged AFTER this commits
+ * (OrderCheckoutService); a decline is compensated by OrderLifecycleService.failPayment.
  * Called only through OrderService, which adds deadlock retry and idempotency-race handling OUTSIDE
  * this transaction (retrying inside a rolled-back transaction would be useless).
  */
@@ -94,7 +97,9 @@ class OrderPlacementTx {
         Order order = new Order();
         order.setCustomer(userRepository.getReferenceById(customerId)); // proxy, no SELECT
         order.setRestaurant(restaurant);
-        order.setStatus(OrderStatus.PLACED);
+        // Online payments start PAYMENT_PENDING (saga); cash on delivery needs no gateway, so it is PLACED now.
+        boolean cashOnDelivery = request.paymentMethod() == PaymentMethod.CASH_ON_DELIVERY;
+        order.setStatus(cashOnDelivery ? OrderStatus.PLACED : OrderStatus.PAYMENT_PENDING);
         order.setSubtotal(totals.subtotal());
         order.setDeliveryFee(totals.deliveryFee());
         order.setTotalAmount(totals.total());
@@ -134,11 +139,14 @@ class OrderPlacementTx {
         orderRepository.flush(); // insert items now, while we hold the item row locks
         recordInitialStatus(order, customerId);
 
-        // 8 + 9. Charge last, once nothing else can fail for business reasons.
-        Payment payment = paymentService.charge(order, request.paymentMethod());
+        // 8. Record the payment; NO gateway call here — it happens after this transaction commits
+        //    (OrderCheckoutService), so no row lock or connection is held during a network call.
+        Payment payment = paymentService.initiate(order, request.paymentMethod());
 
-        // Delivered to listeners only if this transaction commits (a declined payment sends nothing).
-        events.publishEvent(OrderEvent.of(OrderEvent.Kind.STATUS_CHANGED, order, null, customerId, null));
+        // The restaurant is notified once the order is PLACED: now for COD, after payment otherwise.
+        if (cashOnDelivery) {
+            events.publishEvent(OrderEvent.of(OrderEvent.Kind.STATUS_CHANGED, order, null, customerId, null));
+        }
 
         return new PlacementResult(OrderResponse.from(order, payment), false);
     }
@@ -193,7 +201,7 @@ class OrderPlacementTx {
         OrderStatusHistory history = new OrderStatusHistory();
         history.setOrder(order);
         history.setFromStatus(null);
-        history.setToStatus(OrderStatus.PLACED);
+        history.setToStatus(order.getStatus());
         history.setChangedBy(userRepository.getReferenceById(customerId));
         historyRepository.save(history);
     }

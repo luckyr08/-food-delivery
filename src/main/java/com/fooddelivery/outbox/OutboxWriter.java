@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class OutboxWriter {
 
     public static final String RESTAURANT = "RESTAURANT";
+    public static final String PAYMENT = "PAYMENT";
     static final String RESTAURANT_CHANGED = "RESTAURANT_CHANGED";
 
     private final JdbcTemplate jdbc;
@@ -29,6 +30,12 @@ public class OutboxWriter {
     public void restaurantChanged(long restaurantId) {
         jdbc.update("UPDATE restaurants SET search_version = search_version + 1 WHERE id = ?", restaurantId);
         outbox.append(RESTAURANT, restaurantId, RESTAURANT_CHANGED);
+    }
+
+    /** A captured payment must be refunded; the gateway call happens after commit (PaymentRefundHandler). */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void paymentRefundRequested(long paymentId) {
+        outbox.append(PAYMENT, paymentId, "REFUND_REQUESTED");
     }
 
     /** A city's name or visibility changed: every restaurant document in it must be refreshed. */

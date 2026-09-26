@@ -66,8 +66,9 @@ class OrderPlacementIntegrationTest extends IntegrationTestBase {
 
         assertThat(stockOf(biryani)).isEqualTo(3);
         assertThat(stockOf(dal)).isNull(); // unlimited stays unlimited
-        assertThat(jdbc.queryForObject("SELECT to_status FROM order_status_history", String.class))
-                .isEqualTo("PLACED");
+        // saga: PAYMENT_PENDING (stock reserved) -> PLACED (charged after commit)
+        assertThat(jdbc.queryForList("SELECT to_status FROM order_status_history ORDER BY id", String.class))
+                .containsExactly("PAYMENT_PENDING", "PLACED");
     }
 
     @Test

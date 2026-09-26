@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface OrderRepository extends JpaRepository<Order, Long> {
@@ -72,11 +73,15 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             """)
     int claim(Long orderId, Long partnerId);
 
-    /** Restaurant's order queue; uses the (restaurant_id, status) index. */
+    /** Payment saga: orders stuck in PAYMENT_PENDING, oldest first (PaymentReconciler). */
+    List<Order> findTop100ByStatusAndCreatedAtBeforeOrderByIdAsc(OrderStatus status, java.time.Instant before);
+
+    /** Restaurant's order queue (paid orders only); uses the (restaurant_id, status) index. */
     @EntityGraph(attributePaths = {"restaurant"})
     @Query("""
             SELECT o FROM Order o
             WHERE o.restaurant.id = :restaurantId
+              AND o.status <> com.fooddelivery.order.OrderStatus.PAYMENT_PENDING
               AND (:status IS NULL OR o.status = :status)
             """)
     Page<Order> findForRestaurant(Long restaurantId, OrderStatus status, Pageable pageable);

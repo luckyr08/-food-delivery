@@ -328,12 +328,15 @@ stateDiagram-v2
 
 ```mermaid
 stateDiagram-v2
-    [*] --> SUCCESS: card/UPI/wallet approved
+    [*] --> INITIATED: online, order PAYMENT_PENDING
     [*] --> PENDING: cash on delivery
-    SUCCESS --> REFUNDED: order rejected / cancelled
+    INITIATED --> SUCCESS: gateway approved (after commit)
+    INITIATED --> FAILED: declined / expired
+    SUCCESS --> REFUND_PENDING: order rejected / cancelled
+    REFUND_PENDING --> REFUNDED: outbox relay refunds (retried)
     PENDING --> SUCCESS: delivered (cash collected)
     PENDING --> VOIDED: order cancelled
-    note left of SUCCESS: declined charge → no row,<br/>whole placement rolled back (402)
+    note left of INITIATED: gateway is never called<br/>inside a DB transaction
 ```
 
 The order state machine is in the [HLD §6](HLD.md#6-order-lifecycle).
@@ -362,7 +365,8 @@ takes a shared lock and concurrent S→X upgrades deadlock (ADR 0008, 0010, 0012
 |---|---|---|
 | Request services | `@Transactional` on service methods; `open-in-view` off | REPEATABLE READ (InnoDB default); UPDATE = locking read of latest row |
 | Placement retry | `OrderService` (no tx) wraps `OrderPlacementTx` | retry must be outside the rolled-back tx |
-| Payment / outbox writes | `Propagation.MANDATORY` | must join the business transaction |
+| Payment / outbox writes | `Propagation.MANDATORY` | must join the business transaction; never call the gateway |
+| Payment saga | `OrderCheckoutService` (no tx): Tx1 reserve → gateway → Tx2 confirm/compensate | gateway call holds no locks or connections |
 | Notifications | after commit, own tx per recipient on `notify-*` | — |
 | Outbox relay | `TransactionTemplate` per batch | READ COMMITTED (no gap-lock deadlocks) |
 

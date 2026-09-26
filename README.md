@@ -159,8 +159,11 @@ PLACED ──► ACCEPTED ──► PREPARING ──► READY_FOR_PICKUP ──�
 ## Concurrency & consistency
 - **No overselling:** stock is decremented with a single conditional `UPDATE ... WHERE stock >= :qty`
   (row lock + check + write in one statement); 0 rows affected → `409 INSUFFICIENT_STOCK`.
-- **Atomic placement:** order, items, stock and payment are written in one transaction; any failure
-  (including a declined payment) rolls everything back.
+- **Atomic placement without external calls in transactions (saga):** stock is reserved and the order recorded
+  as PAYMENT_PENDING in one short transaction; the gateway is charged after commit; a second transaction
+  confirms (PLACED) or compensates (CANCELLED, stock released). Unknown outcomes (timeouts) return 202 and a
+  reconciler resolves them by asking the gateway; refunds run through the outbox
+  ([ADR 0015](docs/decisions/0015-payment-saga.md)).
 - **Deadlock-free:** items are locked in ascending id order, and stock rows are X-locked before
   `order_items` (whose FK would otherwise take a shared lock first — a deadlock our concurrency test found).
   Deadlocks/lock timeouts are still retried from outside the transaction as a safety net.
@@ -168,9 +171,8 @@ PLACED ──► ACCEPTED ──► PREPARING ──► READY_FOR_PICKUP ──�
 - **Partner contention:** claims use two compare-and-set UPDATEs (partner `AVAILABLE → BUSY`, then order
   `delivery_partner_id IS NULL → partner`) in one transaction, so exactly one partner gets an order and a
   partner never holds two ([ADR 0010](docs/decisions/0010-delivery-assignment.md)).
-- **Payment** is charged last inside the transaction (mock gateway); an approved charge is refunded if
-  the transaction rolls back afterwards. A Saga with `PENDING_PAYMENT` is the production design
-  ([ADR 0008](docs/decisions/0008-order-placement.md)).
+- **Payment** is never called inside a DB transaction: first version charged inside it (ADR 0008), replaced by
+  the saga above — no locks or connections held during network calls, no "charged but no order".
 - **Proven by `OrderConcurrencyTest`** (real server, real HTTP, real MySQL): 50 customers race for
   10 units → exactly 10 orders, 40 × 409, final stock 0; opposite item order from 40 threads → no
   deadlocks; 10 identical requests with one idempotency key → one order, stock deducted once;
@@ -313,7 +315,8 @@ curl -X POST localhost:8080/api/orders -H "Authorization: Bearer $CUSTOMER_TOKEN
   -d '{"restaurantId":1,"items":[{"menuItemId":1,"quantity":2}],
        "deliveryAddress":"Flat 4B, MG Road, Pune","paymentMethod":"UPI"}'
 ```
-- `201` new order · `200` + `Idempotent-Replayed: true` for a repeated key · `409 INSUFFICIENT_STOCK` /
+- `201` placed · `202` payment outcome pending (reconciled later) · `402` declined (order cancelled, stock
+  released) · `200` + `Idempotent-Replayed: true` for a repeated key · `409 INSUFFICIENT_STOCK` /
   `RESTAURANT_CLOSED` / `ITEM_UNAVAILABLE` / `IDEMPOTENCY_KEY_REUSED` · `402 PAYMENT_DECLINED`
 - The request carries no prices; totals are computed server-side. Delivery fee 40.00, free from 500.00.
 
@@ -391,7 +394,7 @@ What I'd change for real production load, roughly in order:
 | Area | Now | Production |
 |---|---|---|
 | Notifications | In-memory after-commit events (best effort) | Move onto the outbox already built for search ([ADR 0013](docs/decisions/0013-search-index-and-outbox.md)), or outbox → Kafka |
-| Payment | Charged inside the placement transaction (mock gateway) + refund on rollback | Saga: `PENDING_PAYMENT` → gateway → confirm / compensate; webhook reconciliation ([ADR 0008](docs/decisions/0008-order-placement.md)) |
+| Payment | Saga: reserve → charge outside transactions → confirm / compensate; reconciler; refunds via outbox ([ADR 0015](docs/decisions/0015-payment-saga.md)) | Signed gateway webhooks for asynchronous methods (UPI, 3-D Secure) |
 | Browsing / menus | Direct DB reads; search via an ES-shaped port with an in-memory adapter, synced by an outbox | Real Elasticsearch adapter behind the same port; CDC (Debezium) instead of the outbox at larger scale; Redis cache for menus |
 | Orders table | Single table | Partition/archive by date; move history to cheaper storage |
 | Hot items (flash sales) | Row-lock serialisation, protected by the bulkhead | Redis stock gate before MySQL, or stock split into bucket rows |

@@ -57,6 +57,7 @@ Keeping this list honest was part of the process; each item is visible in the hi
 | Controller calling a repository directly (broke our own layering rule) | Self-review against `CLAUDE.md` | `MenuBrowseService` |
 | Skipped the README update in step 2 | Me | Rule added to `CLAUDE.md`: every step updates README |
 | Proposed the outbox id as the search document version (ids aren't commit-ordered → lost updates) | Writing the `search-sync` skill | Per-restaurant `search_version` bumped in the same transaction |
+| Charged the payment gateway inside the placement transaction (locks held during a network call, "charged but no order") | Reviewer challenge after step 13 | Payment saga + reconciler + refunds via outbox (ADR 0015) |
 | Outbox relay under REPEATABLE READ deadlocked with parallel relays; DB errors misread as index failures | `SearchSyncConcurrencyTest` | READ COMMITTED relay; narrower catch |
 | Test-only issues: invalid assertion, a Python edit script broken by Java text blocks, bash brace expansion in a curl smoke script | Compiler / test output | Fixed before commit |
 

@@ -30,19 +30,25 @@ public class OrderController {
     static final String REPLAYED = "Idempotent-Replayed";
 
     private final OrderService orderService;
+    private final OrderCheckoutService checkoutService;
     private final OrderLifecycleService lifecycleService;
     private final OrderRateLimiter rateLimiter;
     private final OrderAdmissionControl admission;
 
-    public OrderController(OrderService orderService, OrderLifecycleService lifecycleService,
-                           OrderRateLimiter rateLimiter, OrderAdmissionControl admission) {
+    public OrderController(OrderService orderService, OrderCheckoutService checkoutService,
+                           OrderLifecycleService lifecycleService, OrderRateLimiter rateLimiter,
+                           OrderAdmissionControl admission) {
         this.orderService = orderService;
+        this.checkoutService = checkoutService;
         this.lifecycleService = lifecycleService;
         this.rateLimiter = rateLimiter;
         this.admission = admission;
     }
 
-    /** 201 for a new order; 200 + Idempotent-Replayed: true when the key matched an earlier one. */
+    /**
+     * 201 PLACED; 202 PAYMENT_PENDING when the gateway's outcome is unknown; 402 declined (order cancelled);
+     * 200 + Idempotent-Replayed: true when the key matched an earlier request.
+     */
     @PostMapping
     public ResponseEntity<OrderResponse> place(
             @AuthenticationPrincipal AuthUser me,
@@ -50,9 +56,13 @@ public class OrderController {
             @Valid @RequestBody PlaceOrderRequest request) {
         // Cheapest checks first: per-customer rate limit (429), then the bulkhead that protects the DB (503).
         rateLimiter.check(me.id());
-        PlacementResult result = admission.admit(() -> orderService.placeOrder(me.id(), request, idempotencyKey));
+        PlacementResult result = admission.admit(() -> checkoutService.checkout(me.id(), request, idempotencyKey));
         if (result.replayed()) {
             return ResponseEntity.ok().header(REPLAYED, "true").body(result.order());
+        }
+        if (result.order().status() == OrderStatus.PAYMENT_PENDING) {
+            // Gateway outcome unknown (timeout): accepted, will be confirmed or cancelled by the reconciler.
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(result.order());
         }
         return ResponseEntity.status(HttpStatus.CREATED).body(result.order());
     }

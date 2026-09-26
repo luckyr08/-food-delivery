@@ -1,6 +1,6 @@
 # 0008 — Order placement: atomicity, overselling, payment, idempotency
 
-**Status:** accepted
+**Status:** accepted — payment handling superseded by [ADR 0015](0015-payment-saga.md) (saga, no gateway call inside the transaction)
 
 ## Flow (one transaction, `OrderPlacementTx.place`)
 1. Idempotent replay if the `Idempotency-Key` was already used by this customer

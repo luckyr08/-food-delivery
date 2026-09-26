@@ -79,6 +79,30 @@ public class OrderLifecycleService {
         return transition(order, to, partnerUserId, Role.DELIVERY_PARTNER, null);
     }
 
+    // ---- payment saga (system transitions) ----
+
+    /** Saga step 3a: charge approved. No-op if the order was already resolved (e.g. by the reconciler). */
+    @Transactional
+    public OrderResponse completePayment(long orderId, Long actorId, String providerRef) {
+        Order order = orderRepository.findWithItemsById(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
+        if (order.getStatus() != OrderStatus.PAYMENT_PENDING) {
+            return response(order);
+        }
+        paymentService.confirm(order, providerRef);
+        return transition(order, OrderStatus.PLACED, actorId, Role.SYSTEM, null);
+    }
+
+    /** Saga step 3b (compensation): declined or expired -> cancel, release the stock. */
+    @Transactional
+    public OrderResponse failPayment(long orderId, Long actorId, String reason) {
+        Order order = orderRepository.findWithItemsById(orderId).orElseThrow(() -> new NotFoundException("Order", orderId));
+        if (order.getStatus() != OrderStatus.PAYMENT_PENDING) {
+            return response(order);
+        }
+        paymentService.markFailed(order);
+        return transition(order, OrderStatus.CANCELLED, actorId, Role.SYSTEM, "Payment failed: " + reason);
+    }
+
     @Transactional
     public OrderResponse adminCancel(Long orderId, Long adminId, String reason) {
         Order order = orderRepository.findWithItemsById(orderId)
@@ -119,11 +143,18 @@ public class OrderLifecycleService {
         history.setOrder(order);
         history.setFromStatus(from);
         history.setToStatus(to);
-        history.setChangedBy(userRepository.getReferenceById(actorId));
+        history.setChangedBy(actorId == null ? null : userRepository.getReferenceById(actorId)); // null = system
         history.setNote(reason == null || reason.isBlank() ? null : reason.trim());
         historyRepository.save(history);
 
-        events.publishEvent(OrderEvent.of(OrderEvent.Kind.STATUS_CHANGED, order, from, actorId, history.getNote()));
+        // An order whose payment never went through was never shown to anyone: nothing to announce.
+        if (from != OrderStatus.PAYMENT_PENDING || to != OrderStatus.CANCELLED) {
+            events.publishEvent(OrderEvent.of(OrderEvent.Kind.STATUS_CHANGED, order, from, actorId, history.getNote()));
+        }
+        return OrderResponse.from(order, paymentRepository.findByOrderId(order.getId()).orElse(null));
+    }
+
+    private OrderResponse response(Order order) {
         return OrderResponse.from(order, paymentRepository.findByOrderId(order.getId()).orElse(null));
     }
 

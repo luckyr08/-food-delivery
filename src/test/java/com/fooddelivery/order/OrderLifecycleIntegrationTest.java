@@ -61,7 +61,8 @@ class OrderLifecycleIntegrationTest extends IntegrationTestBase {
 
         getAs(customer, "/api/orders/" + order + "/timeline")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[*].status", contains("PLACED", "ACCEPTED", "PREPARING", "READY_FOR_PICKUP")));
+                .andExpect(jsonPath("$[*].status",
+                        contains("PAYMENT_PENDING", "PLACED", "ACCEPTED", "PREPARING", "READY_FOR_PICKUP")));
     }
 
     @Test
@@ -97,11 +98,13 @@ class OrderLifecycleIntegrationTest extends IntegrationTestBase {
         ownerSets(order, "REJECTED", "Kitchen closing early")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("REJECTED"))
-                .andExpect(jsonPath("$.payment.status").value("REFUNDED"));
+                .andExpect(jsonPath("$.payment.status").value("REFUND_PENDING")); // refund runs after commit
 
         assertThat(stock()).isEqualTo(10);
+        outboxRelay.drain();
+        assertThat(paymentStatus(order)).isEqualTo("REFUNDED");
         getAs(customer, "/api/orders/" + order + "/timeline")
-                .andExpect(jsonPath("$[1].note").value("Kitchen closing early"));
+                .andExpect(jsonPath("$[2].note").value("Kitchen closing early"));
     }
 
     @Test
@@ -114,6 +117,8 @@ class OrderLifecycleIntegrationTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
 
         assertThat(stock()).isEqualTo(10);
+        assertThat(paymentStatus(order)).isEqualTo("REFUND_PENDING");
+        outboxRelay.drain();
         assertThat(paymentStatus(order)).isEqualTo("REFUNDED");
     }
 
@@ -160,7 +165,7 @@ class OrderLifecycleIntegrationTest extends IntegrationTestBase {
         postAs(admin, "/api/admin/orders/" + order + "/cancel", "{\"reason\":\"Customer unreachable\"}")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"))
-                .andExpect(jsonPath("$.payment.status").value("REFUNDED"));
+                .andExpect(jsonPath("$.payment.status").value("REFUND_PENDING"));
 
         assertThat(stock()).isEqualTo(8); // food was already cooked
     }

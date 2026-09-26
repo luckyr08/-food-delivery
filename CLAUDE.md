@@ -35,6 +35,8 @@ explain every line in an interview, so the workflow is deliberately slow.
   stock UPDATE before inserting order_items (ADR 0008); markBusy on the partner before setting
   orders.delivery_partner_id (ADR 0010); rating increments before inserting the review (ADR 0012).
   Always prove lock ordering with a real concurrency test.
+- Never call an external system (payment gateway, push provider) inside a DB transaction: reserve/record in a
+  short transaction, call outside, then confirm or compensate; retries via the outbox (ADR 0015).
 - Search index sync: follow the `search-sync` skill. Every write path that changes indexed data calls
   `OutboxWriter` inside its transaction and before modifying entities; never write to the index directly.
 - Queue-style tables claimed with `FOR UPDATE SKIP LOCKED` are processed under READ COMMITTED (gap locks

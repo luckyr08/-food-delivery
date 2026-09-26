@@ -14,6 +14,7 @@ import static com.fooddelivery.order.OrderStatus.ACCEPTED;
 import static com.fooddelivery.order.OrderStatus.CANCELLED;
 import static com.fooddelivery.order.OrderStatus.DELIVERED;
 import static com.fooddelivery.order.OrderStatus.OUT_FOR_DELIVERY;
+import static com.fooddelivery.order.OrderStatus.PAYMENT_PENDING;
 import static com.fooddelivery.order.OrderStatus.PLACED;
 import static com.fooddelivery.order.OrderStatus.PREPARING;
 import static com.fooddelivery.order.OrderStatus.READY_FOR_PICKUP;
@@ -22,6 +23,7 @@ import static com.fooddelivery.user.Role.ADMIN;
 import static com.fooddelivery.user.Role.CUSTOMER;
 import static com.fooddelivery.user.Role.DELIVERY_PARTNER;
 import static com.fooddelivery.user.Role.RESTAURANT_OWNER;
+import static com.fooddelivery.user.Role.SYSTEM;
 
 /**
  * The single source of truth for the order lifecycle: which transitions exist and which role may
@@ -32,6 +34,10 @@ public final class OrderStateMachine {
     private static final Map<OrderStatus, Map<OrderStatus, Set<Role>>> TRANSITIONS = new EnumMap<>(OrderStatus.class);
 
     static {
+        // Payment saga: only the system resolves a pending payment (confirmed, declined, expired).
+        allow(PAYMENT_PENDING, PLACED, SYSTEM);
+        allow(PAYMENT_PENDING, CANCELLED, SYSTEM);
+
         allow(PLACED, ACCEPTED, RESTAURANT_OWNER);
         allow(PLACED, REJECTED, RESTAURANT_OWNER);
         allow(PLACED, CANCELLED, CUSTOMER, ADMIN);
@@ -84,6 +90,6 @@ public final class OrderStateMachine {
      * so an admin cancellation refunds the customer but doesn't restock.
      */
     public static boolean restocksOnCancel(OrderStatus from) {
-        return from == PLACED || from == ACCEPTED;
+        return from == PAYMENT_PENDING || from == PLACED || from == ACCEPTED;
     }
 }

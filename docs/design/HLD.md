@@ -16,7 +16,7 @@ delivery status; admins manage cities, restaurants and partners.
 | Requirement | Design answer | ADR |
 |---|---|---|
 | No overselling under concurrent orders | Single conditional `UPDATE ... WHERE stock >= :q` per item | [0008](../decisions/0008-order-placement.md) |
-| Stock + order + payment atomic | One transaction; payment charged last; refund-on-rollback hook; Saga as production path | [0008](../decisions/0008-order-placement.md) |
+| Stock + order + payment atomic | Saga: reserve in one short transaction, charge after commit, confirm or compensate; reconciler for unknown outcomes | [0015](../decisions/0015-payment-saga.md) |
 | Partners contending for one order | Two compare-and-set updates (partner AVAILABLE→BUSY, order unassigned→partner) | [0010](../decisions/0010-delivery-assignment.md) |
 | Status fan-out without blocking | `@TransactionalEventListener(AFTER_COMMIT)` + `@Async` pool | [0011](../decisions/0011-async-notifications.md) |
 | Ratings after delivery | Atomic sum/count increments, one review per order | [0012](../decisions/0012-ratings-and-reviews.md) |
@@ -116,7 +116,7 @@ sequenceDiagram
     participant RL as OrderRateLimiter
     participant BH as OrderAdmissionControl
     participant OS as OrderService (retry, idempotency race)
-    participant TX as OrderPlacementTx (@Transactional)
+    participant TX as OrderPlacementTx (Tx1)
     participant DB as MySQL
     participant PG as Payment gateway
     participant EV as Event listener (after commit)
@@ -133,15 +133,21 @@ sequenceDiagram
         TX->>DB: UPDATE menu_items SET stock=stock-q WHERE stock>=q
         DB-->>TX: 0 rows → 409 INSUFFICIENT_STOCK (rollback all)
     end
-    TX->>DB: INSERT order_items (snapshot), history
-    TX->>PG: charge (last step)
-    PG-->>TX: declined → 402, rollback all
-    TX->>DB: INSERT payments
-    TX-->>TX: register refund-on-rollback hook
-    TX->>DB: COMMIT
-    TX-->>EV: OrderEvent delivered AFTER_COMMIT
-    OS-->>API: 201 Created
+    TX->>DB: INSERT order_items (snapshot), history, payment INITIATED
+    TX->>DB: COMMIT (status PAYMENT_PENDING, locks released)
     Note over OS: deadlock/lock timeout → @Retryable (outside tx) → else 503
+    OS->>PG: charge(ref = order id) — outside any transaction
+    alt approved
+        OS->>DB: Tx2: payment SUCCESS, order PLACED
+        DB-->>EV: OrderEvent AFTER_COMMIT (restaurant notified)
+        OS-->>API: 201 Created
+    else declined
+        OS->>DB: Tx2: payment FAILED, order CANCELLED, restock
+        OS-->>API: 402
+    else timeout / unknown
+        OS-->>API: 202 Accepted (PAYMENT_PENDING)
+        Note over PG,DB: PaymentReconciler asks the gateway later, completes or cancels
+    end
 ```
 
 ### 5.2 Delivery partner claim (contention)
@@ -219,7 +225,10 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PLACED: customer places
+    [*] --> PAYMENT_PENDING: customer places (online)
+    [*] --> PLACED: customer places (cash on delivery)
+    PAYMENT_PENDING --> PLACED: system (charge approved / reconciled)
+    PAYMENT_PENDING --> CANCELLED: system (declined / expired)
     PLACED --> ACCEPTED: owner
     PLACED --> REJECTED: owner (reason)
     PLACED --> CANCELLED: customer / admin

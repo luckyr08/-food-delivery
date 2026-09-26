@@ -21,6 +21,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrderStateMachineTest {
 
     private static final Map<String, Set<Role>> EXPECTED = Map.ofEntries(
+            Map.entry("PAYMENT_PENDING>PLACED", Set.of(SYSTEM)),
+            Map.entry("PAYMENT_PENDING>CANCELLED", Set.of(SYSTEM)),
             Map.entry("PLACED>ACCEPTED", Set.of(RESTAURANT_OWNER)),
             Map.entry("PLACED>REJECTED", Set.of(RESTAURANT_OWNER)),
             Map.entry("PLACED>CANCELLED", Set.of(CUSTOMER, ADMIN)),
@@ -57,7 +59,7 @@ class OrderStateMachineTest {
                 }
             }
         }
-        assertThat(checked).isEqualTo(8 * 8 * 4);
+        assertThat(checked).isEqualTo(9 * 9 * 5); // statuses x statuses x roles
     }
 
     @Test
@@ -70,6 +72,7 @@ class OrderStateMachineTest {
 
     @Test
     void onlyUncookedOrdersAreRestocked() {
+        assertThat(OrderStateMachine.restocksOnCancel(PAYMENT_PENDING)).isTrue();
         assertThat(OrderStateMachine.restocksOnCancel(PLACED)).isTrue();
         assertThat(OrderStateMachine.restocksOnCancel(ACCEPTED)).isTrue();
         assertThat(OrderStateMachine.restocksOnCancel(PREPARING)).isFalse();

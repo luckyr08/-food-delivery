@@ -48,6 +48,13 @@ app:
   review:
     # Customers can review an order for this many days after delivery.
     window-days: 7
+  payment:
+    # Orders stuck in PAYMENT_PENDING are checked with the gateway, then completed or cancelled.
+    reservation-expiry-minutes: 15
+    reconciler:
+      enabled: true
+      interval-ms: 60000
+      min-age-seconds: 60
   outbox:
     relay:
       # Background relay that pushes outbox events to the search index.

@@ -1,70 +1,71 @@
 package com.fooddelivery.payment;
 
 import com.fooddelivery.order.Order;
-import lombok.extern.slf4j.Slf4j;
+import com.fooddelivery.outbox.OutboxWriter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-@Slf4j
+/**
+ * Payment state inside order transactions. It never calls the gateway: external calls happen outside any
+ * DB transaction (charge: OrderCheckoutService, refund: PaymentRefundHandler via the outbox), so no row lock
+ * or connection is held during a network call and a failed commit can't leave money moved without a record.
+ */
 @Service
 public class PaymentService {
 
-    private final PaymentGateway gateway;
     private final PaymentRepository paymentRepository;
+    private final OutboxWriter outboxWriter;
 
-    public PaymentService(PaymentGateway gateway, PaymentRepository paymentRepository) {
-        this.gateway = gateway;
+    public PaymentService(PaymentRepository paymentRepository, OutboxWriter outboxWriter) {
         this.paymentRepository = paymentRepository;
+        this.outboxWriter = outboxWriter;
     }
 
-    /**
-     * Must run inside the order-placement transaction (MANDATORY), as its last step.
-     * A decline throws -> the whole placement rolls back (stock restored, no order).
-     * An approved charge whose transaction later rolls back (e.g. commit fails) is refunded by a
-     * rollback hook: the gateway call can't be undone by the DB, so we compensate instead.
-     */
+    /** Saga step 1 (placement transaction): COD is settled on delivery; online starts INITIATED. */
     @Transactional(propagation = Propagation.MANDATORY)
-    public Payment charge(Order order, PaymentMethod method) {
+    public Payment initiate(Order order, PaymentMethod method) {
         Payment payment = new Payment();
         payment.setOrder(order);
         payment.setAmount(order.getTotalAmount());
         payment.setMethod(method);
-
-        if (method == PaymentMethod.CASH_ON_DELIVERY) {
-            payment.setStatus(PaymentStatus.PENDING); // collected on delivery
-            return paymentRepository.save(payment);
-        }
-
-        ChargeResult result = gateway.charge(
-                new ChargeRequest(String.valueOf(order.getId()), order.getTotalAmount(), method));
-        if (!result.approved()) {
-            throw new PaymentDeclinedException(result.failureReason());
-        }
-        registerRefundOnRollback(result.providerRef(), order);
-
-        payment.setStatus(PaymentStatus.SUCCESS);
-        payment.setProviderRef(result.providerRef());
+        payment.setStatus(method == PaymentMethod.CASH_ON_DELIVERY ? PaymentStatus.PENDING : PaymentStatus.INITIATED);
         return paymentRepository.save(payment);
     }
 
+    /** Saga step 3a: the gateway approved the charge. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void confirm(Order order, String providerRef) {
+        Payment payment = require(order);
+        payment.setStatus(PaymentStatus.SUCCESS);
+        payment.setProviderRef(providerRef);
+    }
+
+    /** Saga step 3b: declined, or never charged before the reservation expired. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void markFailed(Order order) {
+        Payment payment = require(order);
+        if (payment.getStatus() == PaymentStatus.INITIATED) {
+            payment.setStatus(PaymentStatus.FAILED);
+        }
+    }
+
     /**
-     * Undo the payment of a rejected/cancelled order, inside that transaction as its last step:
-     * if the gateway refund fails, the cancellation fails too and nothing is half-done.
+     * Undo the payment of a rejected/cancelled order. A captured payment becomes REFUND_PENDING plus an outbox
+     * event in this same transaction; the relay performs the refund after commit, retrying until it succeeds.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void reverse(Order order) {
         paymentRepository.findByOrderId(order.getId()).ifPresent(payment -> {
             switch (payment.getStatus()) {
                 case SUCCESS -> {
-                    gateway.refund(payment.getProviderRef(), payment.getAmount());
-                    payment.setStatus(PaymentStatus.REFUNDED);
+                    payment.setStatus(PaymentStatus.REFUND_PENDING);
+                    outboxWriter.paymentRefundRequested(payment.getId());
                 }
                 case PENDING -> payment.setStatus(PaymentStatus.VOIDED); // COD: nothing was collected
+                case INITIATED -> payment.setStatus(PaymentStatus.FAILED);
                 default -> {
-                    // FAILED / REFUNDED / VOIDED: nothing to undo
+                    // FAILED / REFUND_PENDING / REFUNDED / VOIDED: nothing to undo
                 }
             }
         });
@@ -78,15 +79,8 @@ public class PaymentService {
                 .ifPresent(p -> p.setStatus(PaymentStatus.SUCCESS));
     }
 
-    private void registerRefundOnRollback(String providerRef, Order order) {
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCompletion(int status) {
-                if (status == STATUS_ROLLED_BACK) {
-                    log.warn("Order placement rolled back after charge {}; refunding", providerRef);
-                    gateway.refund(providerRef, order.getTotalAmount());
-                }
-            }
-        });
+    private Payment require(Order order) {
+        return paymentRepository.findByOrderId(order.getId())
+                .orElseThrow(() -> new IllegalStateException("No payment for order " + order.getId()));
     }
 }

@@ -1,96 +1,87 @@
 package com.fooddelivery.payment;
 
 import com.fooddelivery.order.Order;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import com.fooddelivery.outbox.OutboxWriter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-/** Unit test: simulates the surrounding transaction's synchronization callbacks by hand. */
+/** PaymentService never touches the gateway: it only records state (the gateway is called outside transactions). */
 @ExtendWith(MockitoExtension.class)
 class PaymentServiceTest {
 
     @Mock
-    PaymentGateway gateway;
-    @Mock
     PaymentRepository paymentRepository;
+    @Mock
+    OutboxWriter outboxWriter;
     @InjectMocks
     PaymentService service;
 
-    Order order;
-
-    @BeforeEach
-    void setUp() {
-        TransactionSynchronizationManager.initSynchronization();
-        order = new Order();
+    private static Order order() {
+        Order order = new Order();
+        ReflectionTestUtils.setField(order, "id", 42L);
         order.setTotalAmount(new BigDecimal("438.99"));
+        return order;
     }
 
-    @AfterEach
-    void tearDown() {
-        TransactionSynchronizationManager.clearSynchronization();
-    }
-
-    private static void completeTransaction(int status) {
-        TransactionSynchronizationManager.getSynchronizations().forEach(s -> s.afterCompletion(status));
+    private Payment existing(PaymentStatus status) {
+        Payment p = new Payment();
+        ReflectionTestUtils.setField(p, "id", 7L);
+        p.setStatus(status);
+        when(paymentRepository.findByOrderId(42L)).thenReturn(Optional.of(p));
+        return p;
     }
 
     @Test
-    void approvedChargeIsRefundedIfTransactionRollsBack() {
-        when(gateway.charge(any())).thenReturn(ChargeResult.approved("ref_1"));
+    void onlinePaymentStartsInitiatedAndCodPending() {
         when(paymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        Payment payment = service.charge(order, PaymentMethod.CARD);
-        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
-
-        completeTransaction(TransactionSynchronization.STATUS_ROLLED_BACK);
-
-        verify(gateway).refund("ref_1", new BigDecimal("438.99"));
+        assertThat(service.initiate(order(), PaymentMethod.UPI).getStatus()).isEqualTo(PaymentStatus.INITIATED);
+        assertThat(service.initiate(order(), PaymentMethod.CASH_ON_DELIVERY).getStatus()).isEqualTo(PaymentStatus.PENDING);
     }
 
     @Test
-    void approvedChargeIsNotRefundedOnCommit() {
-        when(gateway.charge(any())).thenReturn(ChargeResult.approved("ref_1"));
-        when(paymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    void capturedPaymentBecomesRefundPendingWithAnOutboxEvent() {
+        Payment p = existing(PaymentStatus.SUCCESS);
 
-        service.charge(order, PaymentMethod.UPI);
-        completeTransaction(TransactionSynchronization.STATUS_COMMITTED);
+        service.reverse(order());
 
-        verify(gateway, never()).refund(any(), any());
+        assertThat(p.getStatus()).isEqualTo(PaymentStatus.REFUND_PENDING);
+        verify(outboxWriter).paymentRefundRequested(7L);
     }
 
     @Test
-    void declineThrowsAndRegistersNoRefund() {
-        when(gateway.charge(any())).thenReturn(ChargeResult.declined("insufficient funds"));
+    void codIsVoidedWithoutRefund() {
+        Payment p = existing(PaymentStatus.PENDING);
 
-        assertThatThrownBy(() -> service.charge(order, PaymentMethod.CARD))
-                .isInstanceOf(PaymentDeclinedException.class);
-        assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
-        verify(paymentRepository, never()).save(any());
+        service.reverse(order());
+
+        assertThat(p.getStatus()).isEqualTo(PaymentStatus.VOIDED);
+        verify(outboxWriter, never()).paymentRefundRequested(anyLong());
     }
 
     @Test
-    void cashOnDeliverySkipsTheGateway() {
-        when(paymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    void confirmAndFail() {
+        Payment p = existing(PaymentStatus.INITIATED);
+        service.confirm(order(), "ref_1");
+        assertThat(p.getStatus()).isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(p.getProviderRef()).isEqualTo("ref_1");
 
-        Payment payment = service.charge(order, PaymentMethod.CASH_ON_DELIVERY);
-
-        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.PENDING);
-        verifyNoInteractions(gateway);
+        p.setStatus(PaymentStatus.INITIATED);
+        service.markFailed(order());
+        assertThat(p.getStatus()).isEqualTo(PaymentStatus.FAILED);
     }
 }

@@ -8,7 +8,12 @@ import java.math.BigDecimal;
  */
 public interface PaymentGateway {
 
+    /** Idempotent on request.orderReference(): charging the same order twice returns the first result. */
     ChargeResult charge(ChargeRequest request);
 
+    /** Idempotent on providerRef. */
     void refund(String providerRef, BigDecimal amount);
+
+    /** "Was this order charged?" — used by the reconciler after a timeout or crash. Throws if unreachable. */
+    GatewayChargeStatus status(String orderReference);
 }
